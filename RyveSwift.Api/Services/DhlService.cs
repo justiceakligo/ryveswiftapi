@@ -291,8 +291,12 @@ public class DhlService
             PostalAddress = new DhlPostalAddress
             {
                 CountryCode = address.CountryCode.ToUpper(),
-                CityName = address.CityName,
-                PostalCode = string.IsNullOrWhiteSpace(address.PostalCode) ? null : address.PostalCode,
+                CityName = string.IsNullOrWhiteSpace(address.CityName)
+                    ? DefaultCityFor(address.CountryCode)
+                    : address.CityName,
+                PostalCode = string.IsNullOrWhiteSpace(address.PostalCode)
+                    ? DefaultPostalCodeFor(address.CountryCode)
+                    : address.PostalCode,
                 AddressLine1 = address.AddressLine1,
                 AddressLine2 = address.AddressLine2,
                 AddressLine3 = address.AddressLine3
@@ -300,7 +304,9 @@ public class DhlService
             ContactInformation = new DhlContactInformation
             {
                 FullName = address.ContactName,
-                CompanyName = address.CompanyName,
+                CompanyName = string.IsNullOrWhiteSpace(address.CompanyName)
+                    ? address.ContactName   // DHL requires companyName — fall back to contact name
+                    : address.CompanyName,
                 Phone = address.Phone,
                 Email = address.Email
             }
