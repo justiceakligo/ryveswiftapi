@@ -1,0 +1,31 @@
+# Build output
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Publish output
+.deploy/ryveswift-prod/
+
+# Deploy SQL scripts (may contain credentials)
+.deploy/*.sql
+
+# .NET
+*.nupkg
+*.snupkg
+
+# Rider / JetBrains
+.idea/
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets — never commit
+appsettings.Production.json
+*.pfx
+*.p12
