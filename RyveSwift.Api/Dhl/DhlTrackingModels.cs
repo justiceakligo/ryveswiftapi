@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace RyveSwift.Api.Dhl;
@@ -20,6 +21,7 @@ public class DhlShipmentTracking
     public string? EstimatedDeliveryDate { get; set; }
 
     [JsonPropertyName("status")]
+    [JsonConverter(typeof(DhlTrackingStatusConverter))]
     public DhlTrackingStatus? Status { get; set; }
 
     [JsonPropertyName("events")]
@@ -78,6 +80,31 @@ public class DhlTrackingAddress
 
     [JsonPropertyName("countryCode")]
     public string? CountryCode { get; set; }
+}
+
+// Handles DHL returning status as either a plain string or a full object
+public class DhlTrackingStatusConverter : JsonConverter<DhlTrackingStatus?>
+{
+    public override DhlTrackingStatus? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.String)
+        {
+            var s = reader.GetString();
+            return new DhlTrackingStatus { StatusCode = s, Status = s };
+        }
+        if (reader.TokenType == JsonTokenType.StartObject)
+        {
+            using var doc = JsonDocument.ParseValue(ref reader);
+            var inner = new JsonSerializerOptions(options);
+            inner.Converters.Clear(); // avoid infinite recursion
+            return JsonSerializer.Deserialize<DhlTrackingStatus>(doc.RootElement.GetRawText(), inner);
+        }
+        reader.Skip();
+        return null;
+    }
+
+    public override void Write(Utf8JsonWriter writer, DhlTrackingStatus? value, JsonSerializerOptions options)
+        => JsonSerializer.Serialize(writer, value, options);
 }
 
 public class DhlServiceArea
