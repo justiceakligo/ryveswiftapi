@@ -27,6 +27,7 @@ public static class BookingEndpoints
         AppDbContext db,
         StripeService stripe,
         DhlService dhl,
+        SpacesStorageService spaces,
         ILogger<Program> logger)
     {
         var userId = GetUserId(ctx);
@@ -185,7 +186,7 @@ public static class BookingEndpoints
                 .Include(s => s.CustomsItems)
                 .FirstAsync(s => s.Id == shipment.Id);
 
-            await ShipmentEndpoints.BookDhlShipmentAsync(fullShipment, db, dhl, logger);
+            await ShipmentEndpoints.BookDhlShipmentAsync(fullShipment, db, dhl, spaces, logger);
             await db.SaveChangesAsync();
 
             // Return success
@@ -229,9 +230,9 @@ public static class BookingEndpoints
         var baseUrl = $"/api/shipments/{s.Id}/documents";
         var docs = new List<DocumentInfo>
         {
-            new("label",   $"{baseUrl}/label",   s.LabelFilePath   is not null && File.Exists(s.LabelFilePath)),
-            new("invoice", $"{baseUrl}/invoice", s.InvoiceFilePath is not null && File.Exists(s.InvoiceFilePath)),
-            new("waybill", $"{baseUrl}/waybill", s.WaybillFilePath is not null && File.Exists(s.WaybillFilePath)),
+            new("label",   $"{baseUrl}/label",   s.LabelFilePath   is not null),
+            new("invoice", $"{baseUrl}/invoice", s.InvoiceFilePath is not null),
+            new("waybill", $"{baseUrl}/waybill", s.WaybillFilePath is not null),
         };
 
         return new BookingConfirmResponse(s.Id, s.TrackingNumber, MapStatus(s.Status), docs, null);

@@ -46,9 +46,9 @@ public static class ShipmentEndpoints
             .WithSummary("Download a shipment document (label | invoice | waybill)");
 
         // Legacy per-type endpoints kept for backward compat
-        group.MapGet("/{id:guid}/label",   (Guid id, HttpContext ctx, AppDbContext db) => DownloadFile(id, ctx, db, s => s.LabelFilePath,   "label.pdf"));
-        group.MapGet("/{id:guid}/invoice", (Guid id, HttpContext ctx, AppDbContext db) => DownloadFile(id, ctx, db, s => s.InvoiceFilePath, "invoice.pdf"));
-        group.MapGet("/{id:guid}/waybill", (Guid id, HttpContext ctx, AppDbContext db) => DownloadFile(id, ctx, db, s => s.WaybillFilePath, "waybill.pdf"));
+        group.MapGet("/{id:guid}/label",   (Guid id, HttpContext ctx, AppDbContext db, SpacesStorageService spaces) => DownloadFile(id, ctx, db, spaces, s => s.LabelFilePath,   "label.pdf"));
+        group.MapGet("/{id:guid}/invoice", (Guid id, HttpContext ctx, AppDbContext db, SpacesStorageService spaces) => DownloadFile(id, ctx, db, spaces, s => s.InvoiceFilePath, "invoice.pdf"));
+        group.MapGet("/{id:guid}/waybill", (Guid id, HttpContext ctx, AppDbContext db, SpacesStorageService spaces) => DownloadFile(id, ctx, db, spaces, s => s.WaybillFilePath, "waybill.pdf"));
     }
 
     private static async Task<IResult> CreateFromQuote(
@@ -209,7 +209,7 @@ public static class ShipmentEndpoints
     }
 
     private static async Task<IResult> CreateLabel(
-        Guid id, HttpContext ctx, AppDbContext db, DhlService dhl, ILogger<Program> logger)
+        Guid id, HttpContext ctx, AppDbContext db, DhlService dhl, SpacesStorageService spaces, ILogger<Program> logger)
     {
         var isAdmin = ctx.User.IsInRole("Admin");
         var userId = GetUserId(ctx);
@@ -233,7 +233,7 @@ public static class ShipmentEndpoints
 
         try
         {
-            await BookDhlShipmentAsync(shipment, db, dhl, logger);
+            await BookDhlShipmentAsync(shipment, db, dhl, spaces, logger);
             return Results.Ok(MapToSummaryResponse(shipment));
         }
         catch (DhlException ex)
@@ -270,7 +270,7 @@ public static class ShipmentEndpoints
     }
 
     private static async Task<IResult> DownloadDocument(
-        Guid id, string type, HttpContext ctx, AppDbContext db)
+        Guid id, string type, HttpContext ctx, AppDbContext db, SpacesStorageService spaces)
     {
         Func<Shipment, string?> getPath = type.ToLowerInvariant() switch
         {
@@ -279,20 +279,11 @@ public static class ShipmentEndpoints
             "waybill" => s => s.WaybillFilePath,
             _         => throw new KeyNotFoundException($"Unknown document type: {type}")
         };
-        return await DownloadFile(id, ctx, db, getPath, $"{type.ToLower()}.pdf");
+        return await DownloadFile(id, ctx, db, spaces, getPath, $"{type.ToLower()}.pdf");
     }
 
-    private static async Task<IResult> DownloadLabel(Guid id, HttpContext ctx, AppDbContext db)
-        => await DownloadFile(id, ctx, db, s => s.LabelFilePath, "label.pdf");
-
-    private static async Task<IResult> DownloadInvoice(Guid id, HttpContext ctx, AppDbContext db)
-        => await DownloadFile(id, ctx, db, s => s.InvoiceFilePath, "invoice.pdf");
-
-    private static async Task<IResult> DownloadWaybill(Guid id, HttpContext ctx, AppDbContext db)
-        => await DownloadFile(id, ctx, db, s => s.WaybillFilePath, "waybill.pdf");
-
     private static async Task<IResult> DownloadFile(
-        Guid id, HttpContext ctx, AppDbContext db,
+        Guid id, HttpContext ctx, AppDbContext db, SpacesStorageService spaces,
         Func<Shipment, string?> getPath, string fileName)
     {
         var userId = GetUserId(ctx);
@@ -301,18 +292,18 @@ public static class ShipmentEndpoints
         var shipment = await db.Shipments.FirstOrDefaultAsync(s => s.Id == id && (isAdmin || s.UserId == userId));
         if (shipment is null) return Results.NotFound(new ApiError("not_found", "Shipment not found."));
 
-        var path = getPath(shipment);
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        var key = getPath(shipment);
+        if (string.IsNullOrWhiteSpace(key))
             return Results.NotFound(new ApiError("not_found", "Document not yet available."));
 
-        var bytes = await File.ReadAllBytesAsync(path);
+        var bytes = await spaces.DownloadAsync(key);
         return Results.File(bytes, "application/pdf", fileName);
     }
 
     // ─── Internal helper called by webhook and create-label endpoint ────────
 
     public static async Task BookDhlShipmentAsync(
-        Shipment shipment, AppDbContext db, DhlService dhl, ILogger logger)
+        Shipment shipment, AppDbContext db, DhlService dhl, SpacesStorageService spaces, ILogger logger)
     {
         var packages = await db.ShipmentPackages.Where(p => p.ShipmentId == shipment.Id).ToListAsync();
         var customsItems = await db.CustomsItems.Where(c => c.ShipmentId == shipment.Id).ToListAsync();
@@ -327,10 +318,7 @@ public static class ShipmentEndpoints
         shipment.TrackingNumber = dhlResponse.ShipmentTrackingNumber
             ?? dhlResponse.Packages.FirstOrDefault()?.TrackingNumber;
 
-        // Decode and save documents
-        var storageBase = Path.Combine(Directory.GetCurrentDirectory(), "storage", "shipments", shipment.Id.ToString());
-        Directory.CreateDirectory(storageBase);
-
+        // Upload documents to DO Spaces
         foreach (var doc in dhlResponse.Documents)
         {
             if (string.IsNullOrWhiteSpace(doc.Content)) continue;
@@ -338,24 +326,24 @@ public static class ShipmentEndpoints
             try
             {
                 var bytes = Convert.FromBase64String(doc.Content);
-                string relativePath;
+                var keyBase = $"shipments/{shipment.Id}";
 
                 switch (doc.TypeCode.ToLower())
                 {
                     case "label":
-                        relativePath = Path.Combine(storageBase, "label.pdf");
-                        await File.WriteAllBytesAsync(relativePath, bytes);
-                        shipment.LabelFilePath = relativePath;
+                        var labelKey = $"{keyBase}/label.pdf";
+                        await spaces.UploadAsync(labelKey, bytes);
+                        shipment.LabelFilePath = labelKey;
                         break;
                     case "invoice":
-                        relativePath = Path.Combine(storageBase, "invoice.pdf");
-                        await File.WriteAllBytesAsync(relativePath, bytes);
-                        shipment.InvoiceFilePath = relativePath;
+                        var invoiceKey = $"{keyBase}/invoice.pdf";
+                        await spaces.UploadAsync(invoiceKey, bytes);
+                        shipment.InvoiceFilePath = invoiceKey;
                         break;
                     case "waybilldoc":
-                        relativePath = Path.Combine(storageBase, "waybill.pdf");
-                        await File.WriteAllBytesAsync(relativePath, bytes);
-                        shipment.WaybillFilePath = relativePath;
+                        var waybillKey = $"{keyBase}/waybill.pdf";
+                        await spaces.UploadAsync(waybillKey, bytes);
+                        shipment.WaybillFilePath = waybillKey;
                         break;
                     default:
                         logger.LogInformation("Unknown DHL document type: {TypeCode}", doc.TypeCode);
@@ -421,9 +409,9 @@ public static class ShipmentEndpoints
     {
         var baseUrl = $"/api/shipments/{s.Id}/documents";
         var docs = new List<DocumentInfo>();
-        docs.Add(new("label",   $"{baseUrl}/label",   s.LabelFilePath   is not null && File.Exists(s.LabelFilePath)));
-        docs.Add(new("invoice", $"{baseUrl}/invoice", s.InvoiceFilePath is not null && File.Exists(s.InvoiceFilePath)));
-        docs.Add(new("waybill", $"{baseUrl}/waybill", s.WaybillFilePath is not null && File.Exists(s.WaybillFilePath)));
+        docs.Add(new("label",   $"{baseUrl}/label",   s.LabelFilePath   is not null));
+        docs.Add(new("invoice", $"{baseUrl}/invoice", s.InvoiceFilePath is not null));
+        docs.Add(new("waybill", $"{baseUrl}/waybill", s.WaybillFilePath is not null));
 
         var latestPayment = s.Payments?.OrderByDescending(p => p.UpdatedAt).FirstOrDefault();
         var paymentInfo   = latestPayment is null ? null

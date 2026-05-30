@@ -82,6 +82,7 @@ builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<DhlService>();
 builder.Services.AddScoped<StripeService>();
 builder.Services.AddScoped<MarkupService>();
+builder.Services.AddScoped<SpacesStorageService>();
 builder.Services.AddHostedService<TrackingPollingService>();
 
 // OpenAPI / Scalar
