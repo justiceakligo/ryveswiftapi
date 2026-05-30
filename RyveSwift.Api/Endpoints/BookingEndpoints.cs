@@ -95,9 +95,24 @@ public static class BookingEndpoints
             return Results.NotFound(new ApiError("not_found", "Receiver address not found."));
 
         // ── 7. Compute customs values (use quote customs if not overridden) ───
+        var isDocuments = quote.ProductCode.Equals("D", StringComparison.OrdinalIgnoreCase);
         var customsItems = req.CustomsItems?.Count > 0
             ? req.CustomsItems
             : BuildDefaultCustomsItems(quote);
+
+        // Parcels require a real HS code on every line item
+        if (!isDocuments)
+        {
+            var missingHs = customsItems
+                .Select((ci, i) => (ci, i))
+                .Where(x => string.IsNullOrWhiteSpace(x.ci.HsCode))
+                .Select(x => new FieldError($"customsItems[{x.i}].hsCode",
+                    "HS code is required for parcel customs items. Find yours at hts.usitc.gov or trade-tariff.service.gov.uk."))
+                .ToList();
+            if (missingHs.Count > 0)
+                return Results.BadRequest(new ApiError("validation_failed",
+                    "One or more customs items are missing an HS code.", missingHs));
+        }
 
         var exportReason = req.ExportReason ?? quote.CustomsReason ?? "SOLD";
 
@@ -141,7 +156,7 @@ public static class BookingEndpoints
                 UnitOfMeasurement   = ci.UnitOfMeasurement ?? "PCS",
                 UnitPrice           = ci.UnitPrice,
                 Currency            = ci.Currency ?? quote.Currency,
-                HsCode              = ci.HsCode,
+                HsCode              = ci.HsCode!,
                 ManufacturerCountry = ci.ManufacturerCountry ?? senderAddress.CountryCode,
                 NetWeightKg         = ci.NetWeightKg ?? (quote.WeightKg / Math.Max(ci.Quantity, 1)),
                 GrossWeightKg       = ci.GrossWeightKg ?? (quote.WeightKg / Math.Max(ci.Quantity, 1)),
@@ -234,7 +249,7 @@ public static class BookingEndpoints
                     "PCS",
                     quote.CustomsDeclaredValue ?? quote.TotalAmount,
                     quote.CustomsCurrency ?? quote.Currency,
-                    null, null, null, null)
+                    null, null, null, null)  // HsCode intentionally null — validated by caller
             };
         }
 
@@ -242,7 +257,7 @@ public static class BookingEndpoints
         return new List<CustomsItemRequest>
         {
             new("General Goods", 1, "PCS", quote.TotalAmount, quote.Currency,
-                null, null, null, null)
+                null, null, null, null)  // HsCode intentionally null — validated by caller
         };
     }
 
