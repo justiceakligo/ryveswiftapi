@@ -171,7 +171,7 @@ public class DhlService
                         LineItems = lineItems,
                         Invoice = new DhlInvoice
                         {
-                            Number = shipment.InvoiceNumber ?? $"INV-{shipment.Id:N}",
+                            Number = shipment.InvoiceNumber ?? $"INV-{shipment.Id.ToString("N")[..31]}",
                             Date = (shipment.InvoiceDate ?? DateTime.UtcNow).ToString("yyyy-MM-dd")
                         },
                         ExportReason = shipment.ExportReason ?? "PERSONAL_USE"
