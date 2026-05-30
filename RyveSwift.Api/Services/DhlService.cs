@@ -53,14 +53,14 @@ public class DhlService
                 ShipperDetails = new DhlRateAddressDetails
                 {
                     CountryCode = originCountry.ToUpper(),
-                    CityName = originCity,
-                    PostalCode = string.IsNullOrWhiteSpace(originPostalCode) ? "00000" : originPostalCode
+                    CityName = string.IsNullOrWhiteSpace(originCity) ? DefaultCityFor(originCountry) : originCity,
+                    PostalCode = string.IsNullOrWhiteSpace(originPostalCode) ? DefaultPostalCodeFor(originCountry) : originPostalCode
                 },
                 ReceiverDetails = new DhlRateAddressDetails
                 {
                     CountryCode = destCountry.ToUpper(),
-                    CityName = destCity,
-                    PostalCode = string.IsNullOrWhiteSpace(destPostalCode) ? "00000" : destPostalCode
+                    CityName = string.IsNullOrWhiteSpace(destCity) ? DefaultCityFor(destCountry) : destCity,
+                    PostalCode = string.IsNullOrWhiteSpace(destPostalCode) ? DefaultPostalCodeFor(destCountry) : destPostalCode
                 }
             },
             Accounts = GetRateAccounts(originCountry),
@@ -314,6 +314,24 @@ public class DhlService
             next = next.AddDays(1);
         return next.AddHours(14); // 14:00 UTC
     }
+
+    private static string DefaultCityFor(string countryCode) => countryCode.ToUpperInvariant() switch
+    {
+        "CA" => "Toronto",
+        "US" => "New York",
+        "GH" => "Accra",
+        "NG" => "Lagos",
+        _    => "Unknown"
+    };
+
+    private static string DefaultPostalCodeFor(string countryCode) => countryCode.ToUpperInvariant() switch
+    {
+        "CA" => "M5V 3A1",  // Toronto — valid Canadian format A9A 9A9
+        "US" => "10001",    // New York
+        "GH" => "00233",    // Ghana placeholder
+        "NG" => "100001",   // Lagos placeholder
+        _    => "00000"
+    };
 }
 
 public class DhlException : Exception

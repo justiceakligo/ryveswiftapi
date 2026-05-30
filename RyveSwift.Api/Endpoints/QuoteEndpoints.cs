@@ -100,9 +100,14 @@ public static class QuoteEndpoints
             return Results.BadRequest(new ApiError("validation_failed", "Some shipment details are invalid.", errors));
 
         // ── Call DHL ─────────────────────────────────────────────────────────
-        // Use city if provided; otherwise fall back to postalCode as city hint (works for many DHL markets)
-        var originCity  = req.Origin!.City ?? req.Origin.PostalCode;
-        var destCity    = req.Destination!.City ?? req.Destination.PostalCode;
+        // Use city if provided; fall back to postalCode; then fall back to major city per country.
+        // DHL requires cityName — never send null.
+        var originCity = req.Origin!.City
+            ?? req.Origin.PostalCode
+            ?? DefaultCity(originCountry);
+        var destCity = req.Destination!.City
+            ?? req.Destination.PostalCode
+            ?? DefaultCity(destCountry);
 
         try
         {
@@ -205,4 +210,13 @@ public static class QuoteEndpoints
                ?? ctx.User.FindFirstValue("sub");
         return sub is null ? null : Guid.TryParse(sub, out var id) ? id : null;
     }
+
+    private static string DefaultCity(string countryCode) => countryCode.ToUpperInvariant() switch
+    {
+        "CA" => "Toronto",
+        "US" => "New York",
+        "GH" => "Accra",
+        "NG" => "Lagos",
+        _    => "Unknown"
+    };
 }
