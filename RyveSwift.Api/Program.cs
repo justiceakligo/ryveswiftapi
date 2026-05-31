@@ -1,4 +1,5 @@
 using System.Text;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -74,6 +75,11 @@ builder.Services.AddRateLimiter(options =>
 
 // HTTP clients
 builder.Services.AddHttpClient("dhl");
+builder.Services.AddHttpClient("resend", client =>
+{
+    client.BaseAddress = new Uri("https://api.resend.com/");
+    client.Timeout = TimeSpan.FromSeconds(20);
+});
 
 // Application services
 builder.Services.AddSingleton(sp =>
@@ -83,6 +89,9 @@ builder.Services.AddScoped<DhlService>();
 builder.Services.AddScoped<StripeService>();
 builder.Services.AddScoped<MarkupService>();
 builder.Services.AddScoped<SpacesStorageService>();
+builder.Services.AddScoped<IEmailService, EmailDispatcher>();
+builder.Services.AddScoped<EmailPreferenceTokenService>();
+builder.Services.AddScoped<NotificationEmailService>();
 builder.Services.AddHostedService<TrackingPollingService>();
 
 // OpenAPI / Scalar
@@ -105,6 +114,38 @@ app.UseMiddleware<ErrorHandlingMiddleware>();
 app.UseCors();
 app.UseRateLimiter();
 app.UseAuthentication();
+app.Use(async (context, next) =>
+{
+    if (context.User.Identity?.IsAuthenticated == true)
+    {
+        var sub = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+               ?? context.User.FindFirstValue("sub");
+
+        if (Guid.TryParse(sub, out var userId))
+        {
+            var db = context.RequestServices.GetRequiredService<AppDbContext>();
+            var userStatus = await db.Users
+                .AsNoTracking()
+                .Where(u => u.Id == userId)
+                .Select(u => new { u.IsSuspended, u.DeletedAt })
+                .FirstOrDefaultAsync();
+
+            if (userStatus is null || userStatus.DeletedAt.HasValue)
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return;
+            }
+
+            if (userStatus.IsSuspended)
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
+        }
+    }
+
+    await next();
+});
 app.UseAuthorization();
 
 // OpenAPI docs (always available, secure in prod via network policy)
@@ -127,6 +168,7 @@ app.MapAddressEndpoints();
 app.MapQuoteEndpoints();
 app.MapShipmentEndpoints();
 app.MapPaymentEndpoints();
+app.MapEmailPreferenceEndpoints();
 app.MapTrackingEndpoints();
 app.MapBookingEndpoints();
 app.MapAdminEndpoints();

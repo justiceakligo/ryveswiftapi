@@ -631,7 +631,13 @@ All admin endpoints require `Role: Admin` on the JWT.
       "status": "label_created",
       "originCountry": "CA",
       "destinationCountry": "GH",
+      "productCode": "P",
       "totalAmount": 98.50,
+      "dhlBaseRate": 77.92,
+      "markupPercent": 20.0,
+      "platformFee": 5.00,
+      "markupRevenue": 15.58,
+      "grossProfit": 20.58,
       "currency": "CAD",
       "createdAt": "2026-05-29T18:30:00Z"
     }
@@ -669,14 +675,128 @@ All admin endpoints require `Role: Admin` on the JWT.
 
 #### `GET /api/admin/reports/revenue?from=2026-05-01&to=2026-05-31`
 
+Also available as `GET /api/admin/analytics/overview?from=2026-05-01&to=2026-05-31`.
+If `to` is passed as a date with no time, the report includes that full day.
+Date aliases are supported: `fromDate` / `toDate` and `startDate` / `endDate`.
+
 **Response 200**
 ```json
 {
   "from": "2026-05-01T00:00:00Z",
-  "to": "2026-05-31T00:00:00Z",
+  "to": "2026-05-31T23:59:59.9999999Z",
+  "currency": "CAD",
   "totalRevenue": 1240.00,
+  "dhlBaseCost": 980.00,
+  "markupEarned": 260.00,
   "totalShipments": 12,
-  "currency": "CAD"
+  "paidShipments": 12,
+  "revenueSplit": {
+    "customerRevenue": 1240.00,
+    "dhlActuallyCharged": 980.00,
+    "markupRevenue": 200.00,
+    "platformFees": 60.00,
+    "grossProfit": 260.00,
+    "grossMarginPercent": 20.97,
+    "averageOrderValue": 103.33,
+    "averageDhlCharge": 81.67,
+    "averageMarkupRevenue": 16.67,
+    "averagePlatformFee": 5.00,
+    "averageGrossProfit": 21.67,
+    "averageMarkupPercentApplied": 20.00,
+    "shipmentsMissingDhlCharge": 0
+  },
+  "operations": {
+    "shipmentsCreated": 15,
+    "revenueShipments": 12,
+    "labelsGenerated": 8,
+    "inTransit": 3,
+    "delivered": 1,
+    "pendingPayment": 2,
+    "refunded": 1,
+    "cancelled": 0,
+    "exceptions": 0,
+    "dhlBookingFailures": 1,
+    "dhlBookingFailureRatePercent": 6.67,
+    "totalWeightKg": 36.50,
+    "averageWeightKg": 2.43,
+    "averageMinutesToLabel": 4.75
+  },
+  "funnel": {
+    "quotesCreated": 40,
+    "guestQuotes": 12,
+    "registeredQuotes": 28,
+    "expiredQuotes": 10,
+    "paymentIntentsCreated": 18,
+    "succeededPayments": 12,
+    "failedPayments": 2,
+    "pendingPayments": 3,
+    "refundedPayments": 1,
+    "quoteToShipmentRatePercent": 37.50,
+    "quoteToPaidShipmentRatePercent": 30.00,
+    "paymentSuccessRatePercent": 66.67
+  },
+  "customers": {
+    "totalCustomers": 86,
+    "newCustomers": 9,
+    "activeCustomers": 11,
+    "repeatCustomers": 2,
+    "averageRevenuePerActiveCustomer": 112.73,
+    "averageShipmentsPerActiveCustomer": 1.36
+  },
+  "timeSeries": [
+    {
+      "periodStart": "2026-05-01T00:00:00Z",
+      "period": "2026-05-01",
+      "quotes": 4,
+      "shipments": 2,
+      "paidShipments": 2,
+      "newCustomers": 1,
+      "revenue": 210.00,
+      "dhlActuallyCharged": 166.00,
+      "markupRevenue": 34.00,
+      "platformFees": 10.00,
+      "grossProfit": 44.00
+    }
+  ],
+  "topRoutes": [
+    {
+      "route": "CA-GH",
+      "originCountry": "CA",
+      "destinationCountry": "GH",
+      "shipments": 7,
+      "revenue": 760.00,
+      "dhlActuallyCharged": 600.00,
+      "markupRevenue": 125.00,
+      "platformFees": 35.00,
+      "grossProfit": 160.00,
+      "grossMarginPercent": 21.05,
+      "averageRevenue": 108.57,
+      "averageWeightKg": 2.90
+    }
+  ],
+  "statusBreakdown": [
+    { "status": "LabelGenerated", "count": 8, "revenue": 820.00 }
+  ],
+  "productMix": [
+    {
+      "productCode": "P",
+      "service": "DHL Express Worldwide",
+      "shipments": 10,
+      "revenue": 1090.00,
+      "grossProfit": 230.00,
+      "averageRevenue": 109.00
+    }
+  ],
+  "topCustomers": [
+    {
+      "userId": "3fa85f64-...",
+      "email": "amina@example.com",
+      "shipments": 3,
+      "revenue": 310.00,
+      "grossProfit": 64.00,
+      "lastShipmentAt": "2026-05-29T18:30:00Z"
+    }
+  ]
 }
 ```
 

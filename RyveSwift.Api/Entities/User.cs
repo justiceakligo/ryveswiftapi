@@ -8,6 +8,13 @@ public class User
     public string? FullName { get; set; }
     public string PasswordHash { get; set; } = "";
     public string Role { get; set; } = "Customer";
+    public bool IsSuspended { get; set; }
+    public DateTime? SuspendedAt { get; set; }
+    public string? SuspendedReason { get; set; }
+    public DateTime? DeletedAt { get; set; }
+    public bool PasswordResetRequired { get; set; }
+    public DateTime? PasswordChangedAt { get; set; }
+    public DateTime? EmailUnsubscribedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastLogin { get; set; }
 

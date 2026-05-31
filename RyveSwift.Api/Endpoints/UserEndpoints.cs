@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using RyveSwift.Api.Common;
 using RyveSwift.Api.Data;
 using RyveSwift.Api.Dtos;
+using RyveSwift.Api.Entities;
+using RyveSwift.Api.Services;
 
 namespace RyveSwift.Api.Endpoints;
 
@@ -19,6 +21,10 @@ public static class UserEndpoints
         group.MapPut("/profile", UpdateProfile)
             .WithName("UpdateUserProfile")
             .WithSummary("Update the current user's profile");
+
+        group.MapPost("/change-password", ChangePassword)
+            .WithName("ChangePassword")
+            .WithSummary("Change the current user's password");
     }
 
     private static async Task<IResult> GetProfile(HttpContext ctx, AppDbContext db)
@@ -27,7 +33,7 @@ public static class UserEndpoints
         var user = await db.Users.FindAsync(userId);
         if (user is null) return Results.NotFound(new ApiError("NOT_FOUND", "User not found."));
 
-        return Results.Ok(new UserProfileResponse(user.Id, user.Email, user.Phone, user.FullName, user.Role, user.CreatedAt));
+        return Results.Ok(MapProfile(user));
     }
 
     private static async Task<IResult> UpdateProfile(
@@ -41,8 +47,52 @@ public static class UserEndpoints
         if (req.Phone is not null) user.Phone = req.Phone.Trim();
 
         await db.SaveChangesAsync();
-        return Results.Ok(new UserProfileResponse(user.Id, user.Email, user.Phone, user.FullName, user.Role, user.CreatedAt));
+        return Results.Ok(MapProfile(user));
     }
+
+    private static async Task<IResult> ChangePassword(
+        ChangePasswordRequest req,
+        HttpContext ctx,
+        AppDbContext db,
+        NotificationEmailService emails)
+    {
+        var userId = GetUserId(ctx);
+        var user = await db.Users.FindAsync(userId);
+        if (user is null) return Results.NotFound(new ApiError("NOT_FOUND", "User not found."));
+
+        if (string.IsNullOrWhiteSpace(req.CurrentPassword) || string.IsNullOrWhiteSpace(req.NewPassword))
+            return Results.BadRequest(new ApiError("VALIDATION_FAILED", "Current password and new password are required."));
+
+        if (req.NewPassword.Length < 8)
+            return Results.BadRequest(new ApiError("VALIDATION_FAILED", "New password must be at least 8 characters."));
+
+        if (!BCrypt.Net.BCrypt.Verify(req.CurrentPassword, user.PasswordHash))
+            return Results.BadRequest(new ApiError("VALIDATION_FAILED", "Current password is incorrect."));
+
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.NewPassword);
+        user.PasswordResetRequired = false;
+        user.PasswordChangedAt = DateTime.UtcNow;
+
+        var refreshTokens = await db.UserRefreshTokens
+            .Where(t => t.UserId == user.Id && !t.IsRevoked)
+            .ToListAsync();
+        refreshTokens.ForEach(t => t.IsRevoked = true);
+
+        await db.SaveChangesAsync();
+        await emails.SendPasswordChangedEmailAsync(user);
+        return Results.Ok(MapProfile(user));
+    }
+
+    private static UserProfileResponse MapProfile(User user) =>
+        new(
+            user.Id,
+            user.Email,
+            user.Phone,
+            user.FullName,
+            user.Role,
+            user.PasswordResetRequired,
+            user.EmailUnsubscribedAt,
+            user.CreatedAt);
 
     private static Guid GetUserId(HttpContext ctx)
     {

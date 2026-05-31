@@ -18,6 +18,7 @@ public class AppDbContext : DbContext
     public DbSet<MarkupRule> MarkupRules => Set<MarkupRule>();
     public DbSet<ShipmentEvent> ShipmentEvents => Set<ShipmentEvent>();
     public DbSet<AppConfig> AppConfigs => Set<AppConfig>();
+    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -36,6 +37,16 @@ public class AppDbContext : DbContext
         {
             e.HasKey(x => x.Id);
             e.HasOne(x => x.User).WithMany(u => u.RefreshTokens)
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // PasswordResetToken
+        modelBuilder.Entity<PasswordResetToken>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.TokenHash).IsUnique();
+            e.HasIndex(x => new { x.UserId, x.UsedAt, x.ExpiresAt });
+            e.HasOne(x => x.User).WithMany()
                 .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 

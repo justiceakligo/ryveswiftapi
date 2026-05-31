@@ -209,7 +209,13 @@ public static class ShipmentEndpoints
     }
 
     private static async Task<IResult> CreateLabel(
-        Guid id, HttpContext ctx, AppDbContext db, DhlService dhl, SpacesStorageService spaces, ILogger<Program> logger)
+        Guid id,
+        HttpContext ctx,
+        AppDbContext db,
+        DhlService dhl,
+        SpacesStorageService spaces,
+        ILogger<Program> logger,
+        NotificationEmailService emails)
     {
         var isAdmin = ctx.User.IsInRole("Admin");
         var userId = GetUserId(ctx);
@@ -234,6 +240,8 @@ public static class ShipmentEndpoints
         try
         {
             await BookDhlShipmentAsync(shipment, db, dhl, spaces, logger);
+            var user = shipment.UserId.HasValue ? await db.Users.FindAsync(shipment.UserId.Value) : null;
+            await emails.SendShipmentLabelCreatedAsync(shipment, user);
             return Results.Ok(MapToSummaryResponse(shipment));
         }
         catch (DhlException ex)
@@ -242,7 +250,11 @@ public static class ShipmentEndpoints
         }
     }
 
-    private static async Task<IResult> CancelShipment(Guid id, HttpContext ctx, AppDbContext db)
+    private static async Task<IResult> CancelShipment(
+        Guid id,
+        HttpContext ctx,
+        AppDbContext db,
+        NotificationEmailService emails)
     {
         var userId = GetUserId(ctx);
         var shipment = await db.Shipments.FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId);
@@ -266,6 +278,8 @@ public static class ShipmentEndpoints
         });
 
         await db.SaveChangesAsync();
+        var user = await db.Users.FindAsync(userId);
+        await emails.SendShipmentCancelledAsync(shipment, user);
         return Results.Ok(MapToSummaryResponse(shipment));
     }
 

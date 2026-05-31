@@ -28,7 +28,8 @@ public static class BookingEndpoints
         StripeService stripe,
         DhlService dhl,
         SpacesStorageService spaces,
-        ILogger<Program> logger)
+        ILogger<Program> logger,
+        NotificationEmailService emails)
     {
         var userId = GetUserId(ctx);
 
@@ -191,6 +192,8 @@ public static class BookingEndpoints
 
             // Return success
             var reloaded = await db.Shipments.Include(s => s.Packages).FirstAsync(s => s.Id == shipment.Id);
+            var user = await db.Users.FindAsync(userId);
+            await emails.SendShipmentLabelCreatedAsync(reloaded, user);
             return Results.Ok(BuildConfirmResponse(reloaded, db));
         }
         catch (DhlException ex) when (ex.IsClientError)
@@ -210,6 +213,9 @@ public static class BookingEndpoints
                 logger.LogError(refundEx, "Auto-refund failed after DHL hard error for shipment {Id}", shipment.Id);
             }
 
+            var user = await db.Users.FindAsync(userId);
+            await emails.SendBookingFailureAsync(shipment, user, ex.Message, refundId);
+
             return Results.UnprocessableEntity(new BookingConfirmResponse(
                 shipment.Id, null, "failed", new(), refundId));
         }
@@ -219,6 +225,8 @@ public static class BookingEndpoints
             logger.LogError(ex, "Transient DHL error for shipment {Id}", shipment.Id);
             shipment.Status = "Booked"; // payment OK, DHL pending retry
             await db.SaveChangesAsync();
+            var user = await db.Users.FindAsync(userId);
+            await emails.SendDhlTransientFailureAdminAlertAsync(shipment, user, ex.Message);
             return Results.StatusCode(502);
         }
     }

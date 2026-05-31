@@ -29,6 +29,18 @@ public static class DatabaseSeeder
         new() { Key = "STRIPE_WEBHOOK_SECRET",   Value = "PLACEHOLDER_STRIPE_WEBHOOK_SECRET",   Description = "Stripe webhook signing secret (whsec_...)", IsSecret = true },
         new() { Key = "STRIPE_PUBLISHABLE_KEY",  Value = "PLACEHOLDER_STRIPE_PUBLISHABLE_KEY",  Description = "Stripe publishable key — expose to frontend only, never used server-side" },
 
+        // Email / Resend
+        new() { Key = "email.provider", Value = "resend", Description = "Email provider. Supported: resend, disabled." },
+        new() { Key = "Email:Resend:ApiKey", Value = "PLACEHOLDER_RESEND_API_KEY", Description = "Resend API key used to send transactional email", IsSecret = true },
+        new() { Key = "Email:Resend:From", Value = "no-reply@ryverental.info", Description = "Verified sender email address for transactional email" },
+        new() { Key = "Email:Resend:FromName", Value = "RyveSwift", Description = "Sender display name for transactional email" },
+        new() { Key = "Email:ReplyTo", Value = "support@ryvepool.com", Description = "Reply-to email address for transactional email" },
+        new() { Key = "Email:AdminRecipients", Value = "", Description = "Comma-separated admin alert recipients. Falls back to active admin users when blank." },
+        new() { Key = "Email:PasswordResetExpiryMinutes", Value = "30", Description = "Password reset link lifetime in minutes." },
+        new() { Key = "Email:SubjectPrefix", Value = "RyveSwift", Description = "Prefix applied to outbound email subjects." },
+        new() { Key = "App:PublicBaseUrl", Value = "https://swift.ryvepos.com", Description = "Public API base URL used to build email action links." },
+        new() { Key = "App:FrontendBaseUrl", Value = "https://swift.ryvepos.com", Description = "Frontend base URL used to build email links." },
+
         // Quote settings
         new() { Key = "QUOTE_EXPIRY_HOURS", Value = "24", Description = "How long a quote is valid in hours" },
         new() { Key = "DEFAULT_MARKUP_PERCENT", Value = "20", Description = "Markup % added on top of your DHL discounted rate. 20 = customer pays 20% above your cost. Override per route via markup rules." },

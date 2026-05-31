@@ -1,8 +1,7 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RyveSwift.Api.Data;
 using RyveSwift.Api.Entities;
-using RyveSwift.Api.Services;
-using System.Text.Json;
 
 namespace RyveSwift.Api.Services;
 
@@ -10,9 +9,6 @@ public class TrackingPollingService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<TrackingPollingService> _logger;
-
-    private static readonly HashSet<string> ActiveStatuses = new(StringComparer.OrdinalIgnoreCase)
-        { "Booked", "LabelGenerated", "DroppedOff", "InTransit" };
 
     public TrackingPollingService(IServiceScopeFactory scopeFactory, ILogger<TrackingPollingService> logger)
     {
@@ -49,9 +45,14 @@ public class TrackingPollingService : BackgroundService
         await using var scope = _scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var dhl = scope.ServiceProvider.GetRequiredService<DhlService>();
+        var emails = scope.ServiceProvider.GetRequiredService<NotificationEmailService>();
 
         var activeShipments = await db.Shipments
-            .Where(s => ActiveStatuses.Contains(s.Status) && s.TrackingNumber != null)
+            .Where(s => s.TrackingNumber != null &&
+                (s.Status == "Booked" ||
+                 s.Status == "LabelGenerated" ||
+                 s.Status == "DroppedOff" ||
+                 s.Status == "InTransit"))
             .ToListAsync(ct);
 
         if (activeShipments.Count == 0)
@@ -73,18 +74,22 @@ public class TrackingPollingService : BackgroundService
                 var tracking = dhlResponse.Shipments.FirstOrDefault();
                 if (tracking is null) continue;
 
-                // Update status
                 var newStatus = MapDhlStatus(tracking.Status?.Status ?? "");
                 if (newStatus is not null && shipment.Status != newStatus)
                 {
-                    _logger.LogInformation("Shipment {Id} status updated: {Old} → {New}",
-                        shipment.Id, shipment.Status, newStatus);
+                    var oldStatus = shipment.Status;
+                    _logger.LogInformation("Shipment {Id} status updated: {Old} -> {New}",
+                        shipment.Id, oldStatus, newStatus);
                     shipment.Status = newStatus;
                     shipment.UpdatedAt = DateTime.UtcNow;
                     updated++;
+
+                    var user = shipment.UserId.HasValue
+                        ? await db.Users.FindAsync(new object?[] { shipment.UserId.Value }, ct)
+                        : null;
+                    await emails.SendShipmentStatusChangedAsync(shipment, user, oldStatus, newStatus, ct);
                 }
 
-                // Persist new events
                 foreach (var e in tracking.Events)
                 {
                     var eventDesc = e.Description ?? "Tracking update";
@@ -110,7 +115,7 @@ public class TrackingPollingService : BackgroundService
                     shipment.TrackingNumber, ex.Message);
             }
 
-            await Task.Delay(500, ct); // polite delay between DHL calls
+            await Task.Delay(500, ct);
         }
 
         await db.SaveChangesAsync(ct);

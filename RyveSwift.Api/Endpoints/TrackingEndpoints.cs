@@ -11,9 +11,6 @@ namespace RyveSwift.Api.Endpoints;
 
 public static class TrackingEndpoints
 {
-    private static readonly HashSet<string> ActiveStatuses = new(StringComparer.OrdinalIgnoreCase)
-        { "Booked", "LabelGenerated", "DroppedOff", "InTransit" };
-
     public static void MapTrackingEndpoints(this WebApplication app)
     {
         // Public — no auth required
@@ -32,7 +29,10 @@ public static class TrackingEndpoints
     }
 
     private static async Task<IResult> TrackShipment(
-        string trackingNumber, AppDbContext db, DhlService dhl)
+        string trackingNumber,
+        AppDbContext db,
+        DhlService dhl,
+        NotificationEmailService emails)
     {
         try
         {
@@ -82,8 +82,13 @@ public static class TrackingEndpoints
                 var newStatus = MapDhlStatusToInternal(status);
                 if (newStatus is not null && dbShipment.Status != newStatus)
                 {
+                    var oldStatus = dbShipment.Status;
                     dbShipment.Status = newStatus;
                     dbShipment.UpdatedAt = DateTime.UtcNow;
+                    var user = dbShipment.UserId.HasValue
+                        ? await db.Users.FindAsync(dbShipment.UserId.Value)
+                        : null;
+                    await emails.SendShipmentStatusChangedAsync(dbShipment, user, oldStatus, newStatus);
                 }
 
                 await db.SaveChangesAsync();
@@ -97,10 +102,18 @@ public static class TrackingEndpoints
         }
     }
 
-    private static async Task<IResult> SyncTracking(AppDbContext db, DhlService dhl, ILogger<Program> logger)
+    private static async Task<IResult> SyncTracking(
+        AppDbContext db,
+        DhlService dhl,
+        ILogger<Program> logger,
+        NotificationEmailService emails)
     {
         var activeShipments = await db.Shipments
-            .Where(s => ActiveStatuses.Contains(s.Status) && s.TrackingNumber != null)
+            .Where(s => s.TrackingNumber != null &&
+                (s.Status == "Booked" ||
+                 s.Status == "LabelGenerated" ||
+                 s.Status == "DroppedOff" ||
+                 s.Status == "InTransit"))
             .ToListAsync();
 
         int updated = 0;
@@ -115,9 +128,14 @@ public static class TrackingEndpoints
                 var newStatus = MapDhlStatusToInternal(tracking.Status?.Status ?? "");
                 if (newStatus is not null && shipment.Status != newStatus)
                 {
+                    var oldStatus = shipment.Status;
                     shipment.Status = newStatus;
                     shipment.UpdatedAt = DateTime.UtcNow;
                     updated++;
+                    var user = shipment.UserId.HasValue
+                        ? await db.Users.FindAsync(shipment.UserId.Value)
+                        : null;
+                    await emails.SendShipmentStatusChangedAsync(shipment, user, oldStatus, newStatus);
                 }
 
                 foreach (var e in tracking.Events)

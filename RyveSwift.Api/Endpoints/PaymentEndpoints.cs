@@ -153,7 +153,9 @@ public static class PaymentEndpoints
 
     private static async Task<IResult> HandleStripeWebhook(
         HttpContext ctx, AppDbContext db,
-        StripeService stripe, ILogger<Program> logger)
+        StripeService stripe,
+        ILogger<Program> logger,
+        NotificationEmailService emails)
     {
         string json;
         using (var reader = new StreamReader(ctx.Request.Body))
@@ -189,17 +191,17 @@ public static class PaymentEndpoints
 
             case "payment_intent.payment_failed":
                 if (stripeEvent.Data.Object is Stripe.PaymentIntent failedPi)
-                    await HandlePaymentFailed(failedPi, db, logger);
+                    await HandlePaymentFailed(failedPi, db, logger, emails);
                 break;
 
             case "charge.refunded":
                 if (stripeEvent.Data.Object is Stripe.Charge refundedCharge)
-                    await HandleChargeRefunded(refundedCharge, db, logger);
+                    await HandleChargeRefunded(refundedCharge, db, logger, emails);
                 break;
 
             case "charge.dispute.created":
                 if (stripeEvent.Data.Object is Stripe.Dispute dispute)
-                    await HandleDisputeCreated(dispute, db, logger);
+                    await HandleDisputeCreated(dispute, db, logger, emails);
                 break;
         }
 
@@ -251,7 +253,10 @@ public static class PaymentEndpoints
     }
 
     private static async Task HandlePaymentFailed(
-        Stripe.PaymentIntent intent, AppDbContext db, ILogger logger)
+        Stripe.PaymentIntent intent,
+        AppDbContext db,
+        ILogger logger,
+        NotificationEmailService emails)
     {
         var payment = await db.Payments.FirstOrDefaultAsync(p => p.StripePaymentIntentId == intent.Id);
         if (payment is null || payment.Status == "failed") return;
@@ -276,16 +281,22 @@ public static class PaymentEndpoints
         }
 
         await db.SaveChangesAsync();
+        var user = await ResolvePaymentUser(payment, shipment, db);
+        await emails.SendPaymentFailedAsync(payment, shipment, user);
         logger.LogWarning("Webhook: PI {IntentId} payment_failed", intent.Id);
     }
 
     private static async Task HandleChargeRefunded(
-        Stripe.Charge charge, AppDbContext db, ILogger logger)
+        Stripe.Charge charge,
+        AppDbContext db,
+        ILogger logger,
+        NotificationEmailService emails)
     {
         if (charge.PaymentIntentId is null) return;
         var payment = await db.Payments.FirstOrDefaultAsync(p => p.StripePaymentIntentId == charge.PaymentIntentId);
         if (payment is null) return;
 
+        var wasRefunded = payment.Status == "refunded";
         payment.Status    = "refunded";
         payment.UpdatedAt = DateTime.UtcNow;
 
@@ -306,11 +317,19 @@ public static class PaymentEndpoints
         }
 
         await db.SaveChangesAsync();
+        if (!wasRefunded)
+        {
+            var user = await ResolvePaymentUser(payment, shipment, db);
+            await emails.SendRefundedAsync(payment, shipment, user);
+        }
         logger.LogInformation("Webhook: charge {ChargeId} refunded", charge.Id);
     }
 
     private static async Task HandleDisputeCreated(
-        Stripe.Dispute dispute, AppDbContext db, ILogger logger)
+        Stripe.Dispute dispute,
+        AppDbContext db,
+        ILogger logger,
+        NotificationEmailService emails)
     {
         if (dispute.ChargeId is null) return;
         // Flag for manual review by finding the payment via charge
@@ -318,8 +337,10 @@ public static class PaymentEndpoints
         if (charge?.PaymentIntentId is null) return;
 
         var payment = await db.Payments.FirstOrDefaultAsync(p => p.StripePaymentIntentId == charge.PaymentIntentId);
+        Shipment? shipment = null;
         if (payment?.ShipmentId is not null)
         {
+            shipment = await db.Shipments.FindAsync(payment.ShipmentId.Value);
             db.ShipmentEvents.Add(new ShipmentEvent
             {
                 ShipmentId  = payment.ShipmentId.Value,
@@ -329,7 +350,24 @@ public static class PaymentEndpoints
             await db.SaveChangesAsync();
         }
 
+        var user = payment is null ? null : await ResolvePaymentUser(payment, shipment, db);
+        await emails.SendDisputeAdminAlertAsync(shipment, user, dispute.Id, dispute.Reason ?? "unknown", dispute.Amount);
         logger.LogWarning("Webhook: dispute {DisputeId} created for charge {ChargeId}", dispute.Id, dispute.ChargeId);
+    }
+
+    private static async Task<User?> ResolvePaymentUser(Payment payment, Shipment? shipment, AppDbContext db)
+    {
+        if (shipment?.UserId.HasValue == true)
+            return await db.Users.FindAsync(shipment.UserId.Value);
+
+        if (payment.QuoteId.HasValue)
+        {
+            var quote = await db.Quotes.FindAsync(payment.QuoteId.Value);
+            if (quote?.UserId.HasValue == true)
+                return await db.Users.FindAsync(quote.UserId.Value);
+        }
+
+        return null;
     }
 
     // --- Helpers -----------------------------------------------------------
