@@ -10,7 +10,8 @@ public record ConfirmBookingRequest(
     List<CustomsItemRequest>? CustomsItems,
     string? ExportReason,
     string? InvoiceNumber,
-    DateTime? InvoiceDate);
+    DateTime? InvoiceDate,
+    string? Incoterm = null);
 
 // ─── Shared customs / package sub-shapes ───────────────────────────────────
 
@@ -84,7 +85,8 @@ public record CreateShipmentFromQuoteRequest(
     List<CustomsItemRequest> CustomsItems,
     string ExportReason,
     string InvoiceNumber,
-    DateTime InvoiceDate);
+    DateTime InvoiceDate,
+    string? Incoterm = null);
 
 public record ShipmentResponse(
     Guid Id,

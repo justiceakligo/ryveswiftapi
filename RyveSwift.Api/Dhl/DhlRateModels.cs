@@ -21,6 +21,9 @@ public class DhlRatesRequest
     [JsonPropertyName("valueAddedServices")]
     public List<DhlValueAddedService>? ValueAddedServices { get; set; }
 
+    [JsonPropertyName("monetaryAmount")]
+    public List<DhlMonetaryAmount>? MonetaryAmount { get; set; }
+
     [JsonPropertyName("packages")]
     public List<DhlRatePackage> Packages { get; set; } = new();
 
@@ -72,6 +75,18 @@ public class DhlValueAddedService
 {
     [JsonPropertyName("serviceCode")]
     public string ServiceCode { get; set; } = "";
+}
+
+public class DhlMonetaryAmount
+{
+    [JsonPropertyName("typeCode")]
+    public string TypeCode { get; set; } = "declaredValue";
+
+    [JsonPropertyName("value")]
+    public decimal Value { get; set; }
+
+    [JsonPropertyName("currency")]
+    public string Currency { get; set; } = "CAD";
 }
 
 public class DhlRatePackage

@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -31,46 +32,59 @@ public class DhlService
         string originCountry, string originCity, string? originPostalCode,
         string destCountry, string destCity, string? destPostalCode,
         decimal weightKg, decimal lengthCm, decimal widthCm, decimal heightCm,
-        string productCode)
+        string productCode,
+        decimal? declaredValue = null,
+        string? declaredValueCurrency = null)
     {
-        // CA→CA domestic is not supported
-        if (originCountry.Equals("CA", StringComparison.OrdinalIgnoreCase) &&
-            destCountry.Equals("CA", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new DhlException("UNSUPPORTED_ROUTE", "Canada domestic shipments are not supported by this account.");
-        }
+        originCountry = NormalizeCountryCode(originCountry);
+        destCountry = NormalizeCountryCode(destCountry);
+        productCode = productCode.ToUpperInvariant();
 
         var shippingDateStr = GetNextBusinessDay(DateTime.UtcNow).ToString("yyyy-MM-dd") + "T14:00:00 GMT+00:00";
+        var unitOfMeasurement = UnitOfMeasurementFor(originCountry);
+        var isCustomsDeclarable = IsCustomsDeclarable(productCode, originCountry, destCountry);
 
         var request = new DhlRatesRequest
         {
             ProductCode = productCode,
             LocalProductCode = productCode,
-            IsCustomsDeclarable = !productCode.Equals("D", StringComparison.OrdinalIgnoreCase),
+            UnitOfMeasurement = unitOfMeasurement,
+            IsCustomsDeclarable = isCustomsDeclarable,
             PlannedShippingDateAndTime = shippingDateStr,
             CustomerDetails = new DhlRateCustomerDetails
             {
                 ShipperDetails = new DhlRateAddressDetails
                 {
-                    CountryCode = originCountry.ToUpper(),
+                    CountryCode = originCountry,
                     CityName = string.IsNullOrWhiteSpace(originCity) ? DefaultCityFor(originCountry) : originCity,
-                    PostalCode = string.IsNullOrWhiteSpace(originPostalCode) ? DefaultPostalCodeFor(originCountry) : originPostalCode
+                    PostalCode = NormalizePostalCode(originCountry, originPostalCode)
                 },
                 ReceiverDetails = new DhlRateAddressDetails
                 {
-                    CountryCode = destCountry.ToUpper(),
+                    CountryCode = destCountry,
                     CityName = string.IsNullOrWhiteSpace(destCity) ? DefaultCityFor(destCountry) : destCity,
-                    PostalCode = string.IsNullOrWhiteSpace(destPostalCode) ? DefaultPostalCodeFor(destCountry) : destPostalCode
+                    PostalCode = NormalizePostalCode(destCountry, destPostalCode)
                 }
             },
             Accounts = GetRateAccounts(originCountry),
-            ValueAddedServices = productCode != "D" ? new List<DhlValueAddedService> { new() { ServiceCode = "WY" } } : null,
+            MonetaryAmount = isCustomsDeclarable
+                ? new List<DhlMonetaryAmount>
+                {
+                    new()
+                    {
+                        TypeCode = "declaredValue",
+                        Value = declaredValue.GetValueOrDefault(100m),
+                        Currency = NormalizeCurrency(declaredValueCurrency)
+                    }
+                }
+                : null,
+            ValueAddedServices = isCustomsDeclarable ? new List<DhlValueAddedService> { new() { ServiceCode = "WY" } } : null,
             Packages = new List<DhlRatePackage>
             {
                 new()
                 {
-                    Weight = weightKg,
-                    Dimensions = new DhlDimensions { Length = lengthCm, Width = widthCm, Height = heightCm }
+                    Weight = ConvertWeight(weightKg, unitOfMeasurement),
+                    Dimensions = ConvertDimensions(lengthCm, widthCm, heightCm, unitOfMeasurement)
                 }
             }
         };
@@ -87,7 +101,7 @@ public class DhlService
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning("DHL /rates returned {Status}: {Body}", response.StatusCode, responseBody);
-            throw new DhlException("DHL_RATE_FAILED", $"DHL rate request failed: {response.StatusCode}");
+            throw BuildDhlException("DHL_RATE_FAILED", "rate request", response.StatusCode, responseBody);
         }
 
         var rateResponse = JsonSerializer.Deserialize<DhlRatesResponse>(responseBody, JsonOpts)
@@ -113,7 +127,12 @@ public class DhlService
         Shipment shipment, Address sender, Address receiver,
         List<ShipmentPackage> packages, List<CustomsItem> customsItems)
     {
-        var isDocumentsOnly = shipment.ProductCode.Equals("D", StringComparison.OrdinalIgnoreCase);
+        var originCountry = NormalizeCountryCode(shipment.OriginCountry);
+        var destCountry = NormalizeCountryCode(shipment.DestinationCountry);
+        var productCode = shipment.ProductCode.ToUpperInvariant();
+        var incoterm = NormalizeIncoterm(shipment.Incoterm);
+        var unitOfMeasurement = UnitOfMeasurementFor(originCountry);
+        var isCustomsDeclarable = IsCustomsDeclarable(productCode, originCountry, destCountry);
 
         // Build shipping date (next business day, 14:00 UTC)
         var shippingDate = GetNextBusinessDay(DateTime.UtcNow);
@@ -125,12 +144,15 @@ public class DhlService
             Number = idx + 1,
             Description = item.Description,
             Price = item.UnitPrice,
-            PriceCurrency = item.Currency,
+            PriceCurrency = NormalizeCurrency(item.Currency),
             Quantity = new DhlLineItemQuantity { Value = item.Quantity, UnitOfMeasurement = item.UnitOfMeasurement },
             CommodityCodes = new List<DhlCommodityCode> { new() { TypeCode = "outbound", Value = item.HsCode } },
-            ExportReasonType = "permanent",
-            ManufacturerCountry = item.ManufacturerCountry.ToUpper(),
-            Weight = new DhlItemWeight { NetValue = item.NetWeightKg, GrossValue = item.GrossWeightKg }
+            ManufacturerCountry = NormalizeCountryCode(item.ManufacturerCountry),
+            Weight = new DhlItemWeight
+            {
+                NetValue = ConvertWeight(item.NetWeightKg, unitOfMeasurement),
+                GrossValue = ConvertWeight(item.GrossWeightKg, unitOfMeasurement)
+            }
         }).ToList();
 
         var declaredValue = customsItems.Sum(i => i.UnitPrice * i.Quantity);
@@ -139,13 +161,13 @@ public class DhlService
         {
             PlannedShippingDateAndTime = dateStr,
             Pickup = new DhlPickup { IsRequested = false },
-            ProductCode = shipment.ProductCode,
-            LocalProductCode = shipment.ProductCode,
-            Accounts = GetShipmentAccounts(shipment.OriginCountry),
-            ValueAddedServices = !isDocumentsOnly
+            ProductCode = productCode,
+            LocalProductCode = productCode,
+            Accounts = GetShipmentAccounts(originCountry, destCountry, incoterm),
+            ValueAddedServices = isCustomsDeclarable
                 ? new List<DhlValueAddedService> { new() { ServiceCode = "WY" } }
                 : null,
-            OutputImageProperties = new DhlOutputImageProperties(),
+            OutputImageProperties = DhlOutputImageProperties.ForShipment(isCustomsDeclarable),
             CustomerDetails = new DhlShipmentCustomerDetails
             {
                 ShipperDetails = BuildPartyDetails(sender),
@@ -155,17 +177,18 @@ public class DhlService
             {
                 Packages = packages.Select(p => new DhlContentPackage
                 {
-                    Weight = p.WeightKg,
-                    Dimensions = new DhlDimensions { Length = p.LengthCm, Width = p.WidthCm, Height = p.HeightCm }
+                    Weight = ConvertWeight(p.WeightKg, unitOfMeasurement),
+                    Dimensions = ConvertDimensions(p.LengthCm, p.WidthCm, p.HeightCm, unitOfMeasurement)
                 }).ToList(),
-                IsCustomsDeclarable = !isDocumentsOnly,
-                DeclaredValue = declaredValue,
-                DeclaredValueCurrency = customsItems.FirstOrDefault()?.Currency ?? "CAD",
+                IsCustomsDeclarable = isCustomsDeclarable,
+                DeclaredValue = isCustomsDeclarable ? declaredValue : null,
+                DeclaredValueCurrency = isCustomsDeclarable ? NormalizeCurrency(customsItems.FirstOrDefault()?.Currency) : null,
+                UnitOfMeasurement = unitOfMeasurement,
                 Description = customsItems.Count > 0
                     ? string.Join(", ", customsItems.Select(i => i.Description).Distinct().Take(3))
-                    : shipment.ProductCode,
-                Incoterm = "DAP",
-                ExportDeclaration = !isDocumentsOnly
+                    : productCode,
+                Incoterm = incoterm,
+                ExportDeclaration = isCustomsDeclarable
                     ? new DhlExportDeclaration
                     {
                         LineItems = lineItems,
@@ -174,7 +197,8 @@ public class DhlService
                             Number = shipment.InvoiceNumber ?? $"INV-{shipment.Id.ToString("N")[..31]}",
                             Date = (shipment.InvoiceDate ?? DateTime.UtcNow).ToString("yyyy-MM-dd")
                         },
-                        ExportReason = shipment.ExportReason ?? "PERSONAL_USE"
+                        ExportReason = NormalizeExportReason(shipment.ExportReason),
+                        ExportReasonType = "permanent"
                     }
                     : null
             }
@@ -192,7 +216,7 @@ public class DhlService
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogError("DHL /shipments returned {Status}: {Body}", response.StatusCode, responseBody);
-            throw new DhlException("DHL_SHIPMENT_FAILED", $"DHL shipment creation failed: {response.StatusCode}", (int)response.StatusCode);
+            throw BuildDhlException("DHL_SHIPMENT_FAILED", "shipment creation", response.StatusCode, responseBody);
         }
 
         var shipmentResponse = JsonSerializer.Deserialize<DhlShipmentResponse>(responseBody, JsonOpts)
@@ -216,7 +240,7 @@ public class DhlService
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning("DHL /tracking returned {Status}: {Body}", response.StatusCode, responseBody);
-            throw new DhlException("DHL_TRACKING_FAILED", $"DHL tracking request failed: {response.StatusCode}");
+            throw BuildDhlException("DHL_TRACKING_FAILED", "tracking request", response.StatusCode, responseBody);
         }
 
         return JsonSerializer.Deserialize<DhlTrackingResponse>(responseBody, JsonOpts)
@@ -239,40 +263,41 @@ public class DhlService
         client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", credentials);
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        client.DefaultRequestHeaders.TryAddWithoutValidation("Message-Reference", Guid.NewGuid().ToString());
         return client;
     }
 
-    /// <summary>
-    /// For CA-origin: use export (shipper) account for both shipper and payer.
-    /// For non-CA origin: use import account as payer.
-    /// </summary>
-    private List<DhlAccount> GetShipmentAccounts(string originCountry)
+    private List<DhlAccount> GetShipmentAccounts(string originCountry, string destCountry, string incoterm)
     {
         var exportAccount = _config.Get("DHL_ACCOUNT_NUMBER");
-        var importAccount = _config.Get("DHL_IMPORT_ACCOUNT");
+        var importAccount = GetImportAccount();
+        var originIsCanada = originCountry.Equals("CA", StringComparison.OrdinalIgnoreCase);
+        var isInternational = !originCountry.Equals(destCountry, StringComparison.OrdinalIgnoreCase);
+        var shipperAccount = originIsCanada ? exportAccount : importAccount;
+        var payerAccount = isInternational ? importAccount : exportAccount;
 
-        if (originCountry.Equals("CA", StringComparison.OrdinalIgnoreCase))
+        var accounts = new List<DhlAccount>
         {
-            return new List<DhlAccount>
-            {
-                new() { TypeCode = "shipper", Number = exportAccount },
-                new() { TypeCode = "payer", Number = exportAccount }
-            };
-        }
-        else
+            new() { TypeCode = "shipper", Number = shipperAccount },
+            new() { TypeCode = "payer", Number = payerAccount }
+        };
+
+        if (incoterm.Equals("DDP", StringComparison.OrdinalIgnoreCase))
         {
-            // Never use the Canada export account as payer for non-CA-origin shipments
-            return new List<DhlAccount>
+            accounts.Add(new DhlAccount
             {
-                new() { TypeCode = "payer", Number = importAccount }
-            };
+                TypeCode = "duties-taxes",
+                Number = originIsCanada ? exportAccount : importAccount
+            });
         }
+
+        return accounts;
     }
 
     private List<DhlAccount> GetRateAccounts(string originCountry)
     {
         var exportAccount = _config.Get("DHL_ACCOUNT_NUMBER");
-        var importAccount = _config.Get("DHL_IMPORT_ACCOUNT");
+        var importAccount = GetImportAccount();
 
         return new List<DhlAccount>
         {
@@ -286,29 +311,29 @@ public class DhlService
 
     private static DhlPartyDetails BuildPartyDetails(Address address)
     {
+        var countryCode = NormalizeCountryCode(address.CountryCode);
+
         return new DhlPartyDetails
         {
             PostalAddress = new DhlPostalAddress
             {
-                CountryCode = address.CountryCode.ToUpper(),
+                CountryCode = countryCode,
                 CityName = string.IsNullOrWhiteSpace(address.CityName)
-                    ? DefaultCityFor(address.CountryCode)
-                    : address.CityName,
-                PostalCode = string.IsNullOrWhiteSpace(address.PostalCode)
-                    ? DefaultPostalCodeFor(address.CountryCode)
-                    : address.PostalCode,
-                AddressLine1 = address.AddressLine1,
-                AddressLine2 = address.AddressLine2,
-                AddressLine3 = address.AddressLine3
+                    ? DefaultCityFor(countryCode)
+                    : address.CityName.Trim(),
+                PostalCode = NormalizePostalCode(countryCode, address.PostalCode),
+                AddressLine1 = string.IsNullOrWhiteSpace(address.AddressLine1) ? "N/A" : address.AddressLine1.Trim(),
+                AddressLine2 = CleanOptional(address.AddressLine2),
+                AddressLine3 = CleanOptional(address.AddressLine3)
             },
             ContactInformation = new DhlContactInformation
             {
-                FullName = address.ContactName,
+                FullName = string.IsNullOrWhiteSpace(address.ContactName) ? "Contact" : address.ContactName.Trim(),
                 CompanyName = string.IsNullOrWhiteSpace(address.CompanyName)
-                    ? address.ContactName   // DHL requires companyName — fall back to contact name
-                    : address.CompanyName,
-                Phone = address.Phone,
-                Email = address.Email
+                    ? (string.IsNullOrWhiteSpace(address.ContactName) ? "Contact" : address.ContactName.Trim())
+                    : address.CompanyName.Trim(),
+                Phone = NormalizePhone(address.Phone),
+                Email = CleanOptional(address.Email)
             }
         };
     }
@@ -327,27 +352,193 @@ public class DhlService
         "US" => "New York",
         "GH" => "Accra",
         "NG" => "Lagos",
+        "GB" => "London",
+        "DE" => "Berlin",
+        "AU" => "Sydney",
+        "NL" => "Amsterdam",
+        "CN" => "Shanghai",
+        "HK" => "Hong Kong",
+        "AE" => "Dubai",
+        "PA" => "Panama City",
         _    => "Unknown"
     };
 
     private static string DefaultPostalCodeFor(string countryCode) => countryCode.ToUpperInvariant() switch
     {
-        "CA" => "M5V 3A1",  // Toronto — valid Canadian format A9A 9A9
-        "US" => "10001",    // New York
+        "CA" => "M5V2T6",
+        "US" => "10000",
+        "GB" => "EC1A 1BB",
         "GH" => "00233",    // Ghana placeholder
         "NG" => "100001",   // Lagos placeholder
         _    => "00000"
     };
+
+    private string GetImportAccount()
+    {
+        var importAccount = _config.Get("DHL_IMPORT_ACCOUNT_NUMBER", "");
+        if (!IsPlaceholder(importAccount))
+            return importAccount;
+
+        var legacyImportAccount = _config.Get("DHL_IMPORT_ACCOUNT", "");
+        if (!IsPlaceholder(legacyImportAccount))
+            return legacyImportAccount;
+
+        return string.IsNullOrWhiteSpace(importAccount) ? legacyImportAccount : importAccount;
+    }
+
+    private static DhlException BuildDhlException(
+        string errorCode,
+        string operation,
+        HttpStatusCode statusCode,
+        string responseBody)
+    {
+        var message = FriendlyDhlMessage(operation, statusCode, responseBody);
+        return new DhlException(errorCode, message, (int)statusCode, responseBody);
+    }
+
+    private static string FriendlyDhlMessage(string operation, HttpStatusCode statusCode, string responseBody)
+    {
+        if (responseBody.Contains("IMP enabled", StringComparison.OrdinalIgnoreCase) ||
+            responseBody.Contains("8009", StringComparison.OrdinalIgnoreCase))
+            return "DHL rejected the account for this route. Use the import/IMPEX account for non-Canada-origin shipments.";
+
+        if (responseBody.Contains("420506", StringComparison.OrdinalIgnoreCase))
+            return "DHL rejected the US ZIP code. Use a valid 5- or 9-digit US ZIP code.";
+
+        if (responseBody.Contains("cityDistrict", StringComparison.OrdinalIgnoreCase) ||
+            responseBody.Contains("extraneous key not permitted", StringComparison.OrdinalIgnoreCase))
+            return "DHL rejected an unsupported address district field. Put suburbs or districts in addressLine3.";
+
+        if (responseBody.Contains("postalCode", StringComparison.OrdinalIgnoreCase) &&
+            responseBody.Contains("required", StringComparison.OrdinalIgnoreCase))
+            return "DHL requires a postalCode key for every shipment address. Use 00000 for countries without postal codes.";
+
+        var detail = TryReadDhlDetail(responseBody);
+        return detail is null
+            ? $"DHL {operation} failed: {(int)statusCode} {statusCode}."
+            : $"DHL {operation} failed: {detail}";
+    }
+
+    private static string? TryReadDhlDetail(string responseBody)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(responseBody);
+            if (document.RootElement.TryGetProperty("detail", out var detail) &&
+                detail.ValueKind == JsonValueKind.String)
+                return detail.GetString();
+
+            if (document.RootElement.TryGetProperty("message", out var message) &&
+                message.ValueKind == JsonValueKind.String)
+                return message.GetString();
+        }
+        catch (JsonException)
+        {
+        }
+
+        return string.IsNullOrWhiteSpace(responseBody) ? null : responseBody;
+    }
+
+    private static bool IsCustomsDeclarable(string productCode, string originCountry, string destCountry) =>
+        !originCountry.Equals(destCountry, StringComparison.OrdinalIgnoreCase) &&
+        !productCode.Equals("D", StringComparison.OrdinalIgnoreCase);
+
+    private static string UnitOfMeasurementFor(string originCountry) =>
+        originCountry.Equals("US", StringComparison.OrdinalIgnoreCase) ? "imperial" : "metric";
+
+    private static decimal ConvertWeight(decimal weightKg, string unitOfMeasurement) =>
+        unitOfMeasurement == "imperial" ? RoundDhlDecimal(weightKg * 2.20462262185m) : RoundDhlDecimal(weightKg);
+
+    private static DhlDimensions ConvertDimensions(decimal lengthCm, decimal widthCm, decimal heightCm, string unitOfMeasurement) =>
+        unitOfMeasurement == "imperial"
+            ? new DhlDimensions
+            {
+                Length = RoundDhlDecimal(lengthCm / 2.54m),
+                Width = RoundDhlDecimal(widthCm / 2.54m),
+                Height = RoundDhlDecimal(heightCm / 2.54m)
+            }
+            : new DhlDimensions
+            {
+                Length = RoundDhlDecimal(lengthCm),
+                Width = RoundDhlDecimal(widthCm),
+                Height = RoundDhlDecimal(heightCm)
+            };
+
+    private static decimal RoundDhlDecimal(decimal value) =>
+        Math.Round(value, 3, MidpointRounding.AwayFromZero);
+
+    private static string NormalizeCountryCode(string countryCode) =>
+        string.IsNullOrWhiteSpace(countryCode) ? "" : countryCode.Trim().ToUpperInvariant();
+
+    private static string NormalizeCurrency(string? currency) =>
+        string.IsNullOrWhiteSpace(currency) ? "CAD" : currency.Trim().ToUpperInvariant();
+
+    private static string NormalizeIncoterm(string? incoterm) =>
+        incoterm?.Trim().ToUpperInvariant() == "DDP" ? "DDP" : "DAP";
+
+    private static string NormalizeExportReason(string? exportReason)
+    {
+        var normalized = exportReason?.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            null or "" => "sale",
+            "sold" or "sale" or "sales" => "sale",
+            "personal_use" or "personal use" => "personal",
+            _ => normalized
+        };
+    }
+
+    private static string NormalizePhone(string? phone)
+    {
+        var digits = new string((phone ?? "").Where(char.IsDigit).ToArray());
+        return digits.Length >= 7 ? digits : "0000000000";
+    }
+
+    private static string NormalizePostalCode(string countryCode, string? postalCode)
+    {
+        var normalizedCountry = NormalizeCountryCode(countryCode);
+        var value = postalCode?.Trim();
+        if (string.IsNullOrWhiteSpace(value))
+            value = DefaultPostalCodeFor(normalizedCountry);
+
+        if (normalizedCountry == "US")
+        {
+            var digits = new string(value.Where(char.IsDigit).ToArray());
+            if (string.IsNullOrEmpty(digits))
+                return "10000";
+            if (digits == "1000")
+                return "10000";
+            if (digits.Length < 5)
+                return digits.PadLeft(5, '0');
+            if (digits.Length == 5 || digits.Length == 9)
+                return digits;
+            return digits.Length > 9 ? digits[..9] : digits[..5];
+        }
+
+        if (normalizedCountry == "CA")
+            return value.Replace(" ", "").ToUpperInvariant();
+
+        return value.ToUpperInvariant();
+    }
+
+    private static string? CleanOptional(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static bool IsPlaceholder(string? value) =>
+        string.IsNullOrWhiteSpace(value) ||
+        value.StartsWith("PLACEHOLDER_", StringComparison.OrdinalIgnoreCase);
 }
 
 public class DhlException : Exception
 {
     public string ErrorCode { get; }
     public int HttpStatusCode { get; }
+    public string? RawResponse { get; }
     public bool IsClientError => HttpStatusCode is >= 400 and < 500;
-    public DhlException(string errorCode, string message, int httpStatusCode = 0) : base(message)
+    public DhlException(string errorCode, string message, int httpStatusCode = 0, string? rawResponse = null) : base(message)
     {
         ErrorCode = errorCode;
         HttpStatusCode = httpStatusCode;
+        RawResponse = rawResponse;
     }
 }

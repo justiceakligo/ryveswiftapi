@@ -10,11 +10,6 @@ namespace RyveSwift.Api.Endpoints;
 
 public static class QuoteEndpoints
 {
-    // v1: {CA, US} → {GH, NG} only
-    private static readonly HashSet<string> ValidOrigins      = new(StringComparer.OrdinalIgnoreCase) { "CA", "US" };
-    private static readonly HashSet<string> ValidDestinations = new(StringComparer.OrdinalIgnoreCase) { "GH", "NG" };
-    private static readonly HashSet<string> ValidCustomsCurrencies = new(StringComparer.OrdinalIgnoreCase) { "CAD", "USD", "GHS", "NGN" };
-
     public static void MapQuoteEndpoints(this WebApplication app)
     {
         // POST is public — guests can get a quote before signing in
@@ -50,14 +45,6 @@ public static class QuoteEndpoints
         var originCountry = req.Origin?.Country?.ToUpperInvariant() ?? "";
         var destCountry   = req.Destination?.Country?.ToUpperInvariant() ?? "";
 
-        if (errors.Count == 0)
-        {
-            if (!ValidOrigins.Contains(originCountry))
-                errors.Add(new("origin.country", "v1 only supports shipments originating from CA or US."));
-            if (!ValidDestinations.Contains(destCountry))
-                errors.Add(new("destination.country", "v1 only supports shipments destined for GH or NG."));
-        }
-
         // --- Pieces ---
         if (req.Pieces < 1 || req.Pieces > 50)
             errors.Add(new("pieces", "Pieces must be between 1 and 50."));
@@ -86,14 +73,21 @@ public static class QuoteEndpoints
         }
 
         // --- Customs (for parcels) ---
-        var productCode = req.ShipmentType?.Equals("documents", StringComparison.OrdinalIgnoreCase) == true ? "D" : "P";
+        var isInternational = !originCountry.Equals(destCountry, StringComparison.OrdinalIgnoreCase);
+        var isDocuments = req.ShipmentType?.Equals("documents", StringComparison.OrdinalIgnoreCase) == true;
+        var productCode = !isInternational ? "N" : isDocuments ? "D" : "P";
+        var incoterm = NormalizeIncoterm(req.Incoterm);
+
+        if (incoterm == "DDP" && !isInternational)
+            errors.Add(new("incoterm", "DDP can only be used for international shipments."));
+
         if (productCode == "P" && req.Customs is not null)
         {
             if (req.Customs.DeclaredValue.HasValue && req.Customs.DeclaredValue.Value <= 0)
                 errors.Add(new("customs.declaredValue", "Must be greater than 0."));
             if (!string.IsNullOrWhiteSpace(req.Customs.Currency) &&
-                !ValidCustomsCurrencies.Contains(req.Customs.Currency))
-                errors.Add(new("customs.currency", $"Currency must be one of: {string.Join(", ", ValidCustomsCurrencies)}."));
+                !IsValidCurrency(req.Customs.Currency))
+                errors.Add(new("customs.currency", "Currency must be a valid 3-letter ISO currency code."));
         }
 
         if (errors.Count > 0)
@@ -116,7 +110,9 @@ public static class QuoteEndpoints
                 destCountry,   destCity,   req.Destination.PostalCode,
                 req.WeightKg,
                 req.DimensionsCm!.Length, req.DimensionsCm.Width, req.DimensionsCm.Height,
-                productCode);
+                productCode,
+                req.Customs?.DeclaredValue,
+                req.Customs?.Currency);
 
             var (markupPct, platformFee) = await markup.GetMarkupAsync(
                 originCountry, destCountry, req.WeightKg, productCode);
@@ -138,6 +134,7 @@ public static class QuoteEndpoints
                 DestinationCity       = destCity ?? "",
                 DestinationPostalCode = req.Destination.PostalCode?.Trim(),
                 ProductCode           = productCode,
+                Incoterm              = incoterm,
                 Pieces                = req.Pieces,
                 WeightKg              = req.WeightKg,
                 LengthCm              = req.DimensionsCm.Length,
@@ -165,7 +162,7 @@ public static class QuoteEndpoints
         catch (DhlException ex)
         {
             return Results.Json(new ApiError(ex.ErrorCode, ex.Message),
-                statusCode: ex.ErrorCode == "UNSUPPORTED_ROUTE" ? 422 : 503);
+                statusCode: ex.IsClientError || ex.ErrorCode == "UNSUPPORTED_ROUTE" ? 422 : 503);
         }
     }
 
@@ -191,13 +188,19 @@ public static class QuoteEndpoints
 
     private static QuoteResponse BuildResponse(Quote q, decimal shippingSubtotal, decimal ryveFee, bool expired = false)
     {
-        var service = q.ProductCode.Equals("D", StringComparison.OrdinalIgnoreCase)
-            ? "DHL Express Documents"
-            : "DHL Express Worldwide";
+        var service = q.ProductCode.ToUpperInvariant() switch
+        {
+            "D" => "DHL Express Documents",
+            "N" => "DHL Domestic Express",
+            _ => "DHL Express Worldwide"
+        };
 
-        var eta = q.ProductCode.Equals("D", StringComparison.OrdinalIgnoreCase)
-            ? new EtaBusinessDays(2, 3)
-            : new EtaBusinessDays(3, 5);
+        var eta = q.ProductCode.ToUpperInvariant() switch
+        {
+            "N" => new EtaBusinessDays(1, 2),
+            "D" => new EtaBusinessDays(2, 3),
+            _ => new EtaBusinessDays(3, 5)
+        };
 
         var breakdown = expired ? null : new QuoteBreakdown(shippingSubtotal, 0m, ryveFee);
 
@@ -217,6 +220,24 @@ public static class QuoteEndpoints
         "US" => "New York",
         "GH" => "Accra",
         "NG" => "Lagos",
+        "GB" => "London",
+        "DE" => "Berlin",
+        "AU" => "Sydney",
+        "NL" => "Amsterdam",
+        "CN" => "Shanghai",
+        "HK" => "Hong Kong",
+        "AE" => "Dubai",
+        "PA" => "Panama City",
         _    => "Unknown"
     };
+
+    private static string NormalizeIncoterm(string? incoterm) =>
+        incoterm?.Trim().ToUpperInvariant() switch
+        {
+            "DDP" => "DDP",
+            _ => "DAP"
+        };
+
+    private static bool IsValidCurrency(string currency) =>
+        currency.Length == 3 && currency.All(char.IsLetter);
 }

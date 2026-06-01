@@ -34,11 +34,13 @@ public static class BootstrapHelper
             ALTER TABLE "Shipments" ADD COLUMN IF NOT EXISTS "MarkupPercent" numeric;
             ALTER TABLE "Shipments" ADD COLUMN IF NOT EXISTS "PlatformFee" numeric;
             ALTER TABLE "Shipments" ADD COLUMN IF NOT EXISTS "ProductCode" text NOT NULL DEFAULT 'P';
+            ALTER TABLE "Shipments" ADD COLUMN IF NOT EXISTS "Incoterm" text NOT NULL DEFAULT 'DAP';
             ALTER TABLE "Shipments" ADD COLUMN IF NOT EXISTS "Currency" text NOT NULL DEFAULT 'CAD';
             ALTER TABLE "Shipments" ADD COLUMN IF NOT EXISTS "TotalAmount" numeric NOT NULL DEFAULT 0;
 
             ALTER TABLE "Quotes" ADD COLUMN IF NOT EXISTS "DhlBaseRate" numeric NOT NULL DEFAULT 0;
             ALTER TABLE "Quotes" ADD COLUMN IF NOT EXISTS "DhlCurrency" text NOT NULL DEFAULT 'CAD';
+            ALTER TABLE "Quotes" ADD COLUMN IF NOT EXISTS "Incoterm" text NOT NULL DEFAULT 'DAP';
             ALTER TABLE "Quotes" ADD COLUMN IF NOT EXISTS "MarkupPercent" numeric NOT NULL DEFAULT 0;
             ALTER TABLE "Quotes" ADD COLUMN IF NOT EXISTS "PlatformFee" numeric NOT NULL DEFAULT 0;
             ALTER TABLE "Quotes" ADD COLUMN IF NOT EXISTS "TotalAmount" numeric NOT NULL DEFAULT 0;

@@ -97,13 +97,15 @@ public static class BookingEndpoints
             return Results.NotFound(new ApiError("not_found", "Receiver address not found."));
 
         // ── 7. Compute customs values (use quote customs if not overridden) ───
-        var isDocuments = quote.ProductCode.Equals("D", StringComparison.OrdinalIgnoreCase);
-        var customsItems = req.CustomsItems?.Count > 0
-            ? req.CustomsItems
-            : BuildDefaultCustomsItems(quote);
+        var needsCustoms = RequiresCustoms(quote);
+        var customsItems = needsCustoms
+            ? req.CustomsItems?.Count > 0
+                ? req.CustomsItems
+                : BuildDefaultCustomsItems(quote)
+            : new List<CustomsItemRequest>();
 
         // Parcels require a real HS code on every line item
-        if (!isDocuments)
+        if (needsCustoms)
         {
             var missingHs = customsItems
                 .Select((ci, i) => (ci, i))
@@ -116,7 +118,10 @@ public static class BookingEndpoints
                     "One or more customs items are missing an HS code.", missingHs));
         }
 
-        var exportReason = req.ExportReason ?? quote.CustomsReason ?? "SOLD";
+        var exportReason = req.ExportReason ?? quote.CustomsReason ?? "sale";
+        var incoterm = NormalizeIncoterm(req.Incoterm ?? quote.Incoterm);
+        if (incoterm == "DDP" && quote.OriginCountry.Equals(quote.DestinationCountry, StringComparison.OrdinalIgnoreCase))
+            return Results.BadRequest(new ApiError("validation_failed", "DDP can only be used for international shipments."));
 
         // ── 8. Create Shipment entity ─────────────────────────────────────────
         var shipment = new Shipment
@@ -128,12 +133,16 @@ public static class BookingEndpoints
             OriginCountry       = quote.OriginCountry,
             DestinationCountry  = quote.DestinationCountry,
             ProductCode         = quote.ProductCode,
+            Incoterm            = incoterm,
             DhlBaseRate         = quote.DhlBaseRate,
             MarkupPercent       = quote.MarkupPercent,
             PlatformFee         = quote.PlatformFee,
             TotalAmount         = quote.TotalAmount,
             Currency            = quote.Currency,
             Status              = "PaymentAuthorized",
+            ExportReason        = exportReason.Trim(),
+            InvoiceNumber       = req.InvoiceNumber?.Trim(),
+            InvoiceDate         = req.InvoiceDate
         };
         db.Shipments.Add(shipment);
 
@@ -270,6 +279,10 @@ public static class BookingEndpoints
         };
     }
 
+    private static bool RequiresCustoms(Quote quote) =>
+        !quote.OriginCountry.Equals(quote.DestinationCountry, StringComparison.OrdinalIgnoreCase) &&
+        !quote.ProductCode.Equals("D", StringComparison.OrdinalIgnoreCase);
+
     private static string MapStatus(string status) => status switch
     {
         "PendingPayment" or "PaymentFailed" => "pending_payment",
@@ -284,6 +297,13 @@ public static class BookingEndpoints
         "Refunded"          => "refunded",
         _                   => status.ToLower()
     };
+
+    private static string NormalizeIncoterm(string? incoterm) =>
+        incoterm?.Trim().ToUpperInvariant() switch
+        {
+            "DDP" => "DDP",
+            _ => "DAP"
+        };
 
     private static Guid GetUserId(HttpContext ctx)
     {

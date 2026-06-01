@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RyveSwift.Api.Common;
 using RyveSwift.Api.Data;
+using RyveSwift.Api.Dhl;
 using RyveSwift.Api.Dtos;
 using RyveSwift.Api.Entities;
 using RyveSwift.Api.Services;
@@ -45,10 +46,11 @@ public static class TrackingEndpoints
             var events = shipmentTracking.Events.Select(e => new TrackingEventResponse(
                 ParseDhlTimestamp(e.Timestamp),
                 e.Location?.Address?.AddressLocality ?? e.Location?.Address?.CountryCode,
-                e.Description
+                e.Description ?? e.StatusCode
             )).ToList();
 
-            var status = shipmentTracking.Status?.Status ?? "Unknown";
+            var statusCode = GetDhlStatusCode(shipmentTracking.Status);
+            var status = shipmentTracking.Status?.Description ?? statusCode ?? "Unknown";
 
             // Estimated delivery from DHL (if available)
             var estimatedDelivery = shipmentTracking.EstimatedDeliveryDate;
@@ -79,7 +81,7 @@ public static class TrackingEndpoints
                 }
 
                 // Update shipment status based on DHL tracking
-                var newStatus = MapDhlStatusToInternal(status);
+                var newStatus = MapDhlStatusToInternal(statusCode);
                 if (newStatus is not null && dbShipment.Status != newStatus)
                 {
                     var oldStatus = dbShipment.Status;
@@ -125,7 +127,7 @@ public static class TrackingEndpoints
                 var tracking = dhlResponse.Shipments.FirstOrDefault();
                 if (tracking is null) continue;
 
-                var newStatus = MapDhlStatusToInternal(tracking.Status?.Status ?? "");
+                var newStatus = MapDhlStatusToInternal(GetDhlStatusCode(tracking.Status));
                 if (newStatus is not null && shipment.Status != newStatus)
                 {
                     var oldStatus = shipment.Status;
@@ -167,17 +169,21 @@ public static class TrackingEndpoints
         return Results.Ok(new { message = $"Sync complete. {activeShipments.Count} checked, {updated} statuses updated." });
     }
 
-    private static string? MapDhlStatusToInternal(string dhlStatus)
+    private static string? MapDhlStatusToInternal(string? dhlStatus)
     {
-        return dhlStatus.ToUpper() switch
+        return dhlStatus?.Trim().ToUpperInvariant() switch
         {
+            "PICKED-UP" or "PU" => "DroppedOff",
             "TRANSIT" => "InTransit",
-            "DELIVERED" => "Delivered",
-            "DELIVERY_FAILURE" => "Exception",
-            "DELIVERY_IMPOSSIBLE" => "Exception",
+            "OUT-FOR-DELIVERY" => "OutForDelivery",
+            "DELIVERED" or "OK" => "Delivered",
+            "FAILURE" or "RT" or "DELIVERY_FAILURE" or "DELIVERY_IMPOSSIBLE" => "Exception",
             _ => null
         };
     }
+
+    private static string? GetDhlStatusCode(DhlTrackingStatus? status) =>
+        status?.StatusCode ?? status?.Status ?? status?.Description;
 
     private static DateTime ParseDhlTimestamp(string? timestamp)
     {

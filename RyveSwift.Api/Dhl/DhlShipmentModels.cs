@@ -49,11 +49,22 @@ public class DhlOutputImageProperties
     public string EncodingFormat { get; set; } = "pdf";
 
     [JsonPropertyName("imageOptions")]
-    public List<DhlImageOption> ImageOptions { get; set; } = new()
+    public List<DhlImageOption> ImageOptions { get; set; } = new();
+
+    public static DhlOutputImageProperties ForShipment(bool includeInvoice) => new()
     {
-        new DhlImageOption { TypeCode = "label", TemplateName = "ECOM26_84_001", IsRequested = true },
-        new DhlImageOption { TypeCode = "invoice", TemplateName = "COMMERCIAL_INVOICE_P_10", IsRequested = true },
-        new DhlImageOption { TypeCode = "waybillDoc", TemplateName = "ARCH_8x4", IsRequested = true }
+        ImageOptions = includeInvoice
+            ? new List<DhlImageOption>
+            {
+                new() { TypeCode = "label", TemplateName = "ECOM26_84_001", IsRequested = true },
+                new() { TypeCode = "invoice", TemplateName = "COMMERCIAL_INVOICE_P_10", IsRequested = true },
+                new() { TypeCode = "waybillDoc", TemplateName = "ARCH_8X4", IsRequested = true }
+            }
+            : new List<DhlImageOption>
+            {
+                new() { TypeCode = "label", TemplateName = "ECOM26_84_001", IsRequested = true },
+                new() { TypeCode = "waybillDoc", TemplateName = "ARCH_8X4", IsRequested = true }
+            }
     };
 }
 
@@ -137,10 +148,12 @@ public class DhlContent
     public bool IsCustomsDeclarable { get; set; } = true;
 
     [JsonPropertyName("declaredValue")]
-    public decimal DeclaredValue { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? DeclaredValue { get; set; }
 
     [JsonPropertyName("declaredValueCurrency")]
-    public string DeclaredValueCurrency { get; set; } = "CAD";
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeclaredValueCurrency { get; set; }
 
     [JsonPropertyName("exportDeclaration")]
     public DhlExportDeclaration? ExportDeclaration { get; set; }
@@ -173,7 +186,10 @@ public class DhlExportDeclaration
     public DhlInvoice Invoice { get; set; } = new();
 
     [JsonPropertyName("exportReason")]
-    public string ExportReason { get; set; } = "PERSONAL_USE";
+    public string ExportReason { get; set; } = "sale";
+
+    [JsonPropertyName("exportReasonType")]
+    public string ExportReasonType { get; set; } = "permanent";
 }
 
 public class DhlLineItem
@@ -195,9 +211,6 @@ public class DhlLineItem
 
     [JsonPropertyName("commodityCodes")]
     public List<DhlCommodityCode> CommodityCodes { get; set; } = new();
-
-    [JsonPropertyName("exportReasonType")]
-    public string ExportReasonType { get; set; } = "permanent";
 
     [JsonPropertyName("manufacturerCountry")]
     public string ManufacturerCountry { get; set; } = "";
@@ -278,6 +291,9 @@ public class DhlDocument
 {
     [JsonPropertyName("typeCode")]
     public string TypeCode { get; set; } = "";
+
+    [JsonPropertyName("imageFormat")]
+    public string ImageFormat { get; set; } = "";
 
     [JsonPropertyName("content")]
     public string Content { get; set; } = "";

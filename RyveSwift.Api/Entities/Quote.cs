@@ -11,6 +11,7 @@ public class Quote
     public string DestinationCity { get; set; } = "";
     public string? DestinationPostalCode { get; set; }
     public string ProductCode { get; set; } = "P";
+    public string Incoterm { get; set; } = "DAP";
     public decimal WeightKg { get; set; }
     public decimal LengthCm { get; set; }
     public decimal WidthCm { get; set; }

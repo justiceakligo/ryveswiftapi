@@ -10,6 +10,7 @@ public class Shipment
     public string? DhlShipmentId { get; set; }
     public string? TrackingNumber { get; set; }
     public string ProductCode { get; set; } = "P";
+    public string Incoterm { get; set; } = "DAP";
     public string OriginCountry { get; set; } = "";
     public string DestinationCountry { get; set; } = "";
     public string Status { get; set; } = "PendingPayment";

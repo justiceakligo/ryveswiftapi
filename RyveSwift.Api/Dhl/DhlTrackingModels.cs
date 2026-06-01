@@ -14,6 +14,9 @@ public class DhlShipmentTracking
     [JsonPropertyName("id")]
     public string Id { get; set; } = "";
 
+    [JsonPropertyName("shipmentTrackingNumber")]
+    public string ShipmentTrackingNumber { get; set; } = "";
+
     [JsonPropertyName("service")]
     public string? Service { get; set; }
 
@@ -56,6 +59,9 @@ public class DhlTrackingEvent
 {
     [JsonPropertyName("timestamp")]
     public string? Timestamp { get; set; }
+
+    [JsonPropertyName("statusCode")]
+    public string? StatusCode { get; set; }
 
     [JsonPropertyName("location")]
     public DhlTrackingLocation? Location { get; set; }

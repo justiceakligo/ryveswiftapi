@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RyveSwift.Api.Data;
+using RyveSwift.Api.Dhl;
 using RyveSwift.Api.Entities;
 
 namespace RyveSwift.Api.Services;
@@ -74,7 +75,7 @@ public class TrackingPollingService : BackgroundService
                 var tracking = dhlResponse.Shipments.FirstOrDefault();
                 if (tracking is null) continue;
 
-                var newStatus = MapDhlStatus(tracking.Status?.Status ?? "");
+                var newStatus = MapDhlStatus(GetDhlStatusCode(tracking.Status));
                 if (newStatus is not null && shipment.Status != newStatus)
                 {
                     var oldStatus = shipment.Status;
@@ -122,11 +123,16 @@ public class TrackingPollingService : BackgroundService
         _logger.LogInformation("Tracking sync complete. {Updated}/{Total} statuses updated.", updated, activeShipments.Count);
     }
 
-    private static string? MapDhlStatus(string dhlStatus) => dhlStatus.ToUpper() switch
+    private static string? MapDhlStatus(string? dhlStatus) => dhlStatus?.Trim().ToUpperInvariant() switch
     {
+        "PICKED-UP" or "PU" => "DroppedOff",
         "TRANSIT" => "InTransit",
-        "DELIVERED" => "Delivered",
-        "DELIVERY_FAILURE" or "DELIVERY_IMPOSSIBLE" => "Exception",
+        "OUT-FOR-DELIVERY" => "OutForDelivery",
+        "DELIVERED" or "OK" => "Delivered",
+        "FAILURE" or "RT" or "DELIVERY_FAILURE" or "DELIVERY_IMPOSSIBLE" => "Exception",
         _ => null
     };
+
+    private static string? GetDhlStatusCode(DhlTrackingStatus? status) =>
+        status?.StatusCode ?? status?.Status ?? status?.Description;
 }

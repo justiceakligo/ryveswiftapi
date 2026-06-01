@@ -20,6 +20,7 @@ public static class DatabaseSeeder
         new() { Key = "DHL_API_KEY", Value = "PLACEHOLDER_DHL_API_KEY", Description = "DHL MyDHL API username / site ID", IsSecret = true },
         new() { Key = "DHL_API_SECRET", Value = "PLACEHOLDER_DHL_API_SECRET", Description = "DHL MyDHL API password", IsSecret = true },
         new() { Key = "DHL_ACCOUNT_NUMBER", Value = "PLACEHOLDER_DHL_ACCOUNT", Description = "DHL export (Canada-origin) shipper account number", IsSecret = true },
+        new() { Key = "DHL_IMPORT_ACCOUNT_NUMBER", Value = "PLACEHOLDER_DHL_IMPORT_ACCOUNT", Description = "DHL import / IMPEX-enabled account number", IsSecret = true },
         new() { Key = "DHL_IMPORT_ACCOUNT", Value = "PLACEHOLDER_DHL_IMPORT_ACCOUNT", Description = "DHL import/payer account for non-Canada-origin shipments", IsSecret = true },
         new() { Key = "DHL_BASE_URL", Value = "https://express.api.dhl.com/mydhlapi/test", Description = "DHL API base URL (test or production)" },
         new() { Key = "DHL_TIMEOUT_SECONDS", Value = "30", Description = "HTTP timeout in seconds for DHL API calls" },

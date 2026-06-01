@@ -25,7 +25,8 @@ public record QuoteRequest(
     int Pieces,
     decimal WeightKg,
     QuoteDimensionsInput DimensionsCm,
-    QuoteCustomsInput? Customs);
+    QuoteCustomsInput? Customs,
+    string? Incoterm = null);
 
 // ─── Response ──────────────────────────────────────────────────────────────
 

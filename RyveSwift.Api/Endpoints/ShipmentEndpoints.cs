@@ -73,7 +73,7 @@ public static class ShipmentEndpoints
             return Results.NotFound(new ApiError("not_found", "Receiver address not found."));
 
         // Validate customs items (required for non-documents)
-        if (!quote.ProductCode.Equals("D", StringComparison.OrdinalIgnoreCase))
+        if (RequiresCustoms(quote))
         {
             if (req.CustomsItems == null || req.CustomsItems.Count == 0)
                 return Results.BadRequest(new ApiError("invalid_customs_data", "Customs items are required for parcel shipments."));
@@ -111,6 +111,10 @@ public static class ShipmentEndpoints
             }
         }
 
+        var incoterm = NormalizeIncoterm(req.Incoterm ?? quote.Incoterm);
+        if (incoterm == "DDP" && quote.OriginCountry.Equals(quote.DestinationCountry, StringComparison.OrdinalIgnoreCase))
+            return Results.BadRequest(new ApiError("validation_failed", "DDP can only be used for international shipments."));
+
         var shipment = new Shipment
         {
             UserId = userId,
@@ -118,6 +122,7 @@ public static class ShipmentEndpoints
             SenderAddressId = senderAddress.Id,
             ReceiverAddressId = receiverAddress.Id,
             ProductCode = quote.ProductCode,
+            Incoterm = incoterm,
             OriginCountry = quote.OriginCountry,
             DestinationCountry = quote.DestinationCountry,
             Status = "PendingPayment",
@@ -402,9 +407,12 @@ public static class ShipmentEndpoints
     };
 
     private static string ServiceName(string productCode) =>
-        productCode.Equals("D", StringComparison.OrdinalIgnoreCase)
-            ? "DHL Express Documents"
-            : "DHL Express Worldwide";
+        productCode.ToUpperInvariant() switch
+        {
+            "D" => "DHL Express Documents",
+            "N" => "DHL Domestic Express",
+            _ => "DHL Express Worldwide"
+        };
 
     private static ShipmentListItem MapToListItem(Shipment s)
     {
@@ -462,6 +470,17 @@ public static class ShipmentEndpoints
         a.CountryCode, a.CityName, a.PostalCode,
         a.AddressLine1, a.AddressLine2, a.AddressLine3,
         a.IsDefaultSender, a.CreatedAt);
+
+    private static bool RequiresCustoms(Quote quote) =>
+        !quote.OriginCountry.Equals(quote.DestinationCountry, StringComparison.OrdinalIgnoreCase) &&
+        !quote.ProductCode.Equals("D", StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeIncoterm(string? incoterm) =>
+        incoterm?.Trim().ToUpperInvariant() switch
+        {
+            "DDP" => "DDP",
+            _ => "DAP"
+        };
 
     private static Guid GetUserId(HttpContext ctx)
     {
