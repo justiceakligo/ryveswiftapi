@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using RyveSwift.Api.Common;
 using RyveSwift.Api.Data;
+using RyveSwift.Api.Dhl;
 using RyveSwift.Api.Dtos;
 using RyveSwift.Api.Entities;
 using RyveSwift.Api.Services;
@@ -10,12 +11,6 @@ namespace RyveSwift.Api.Endpoints;
 
 public static class ShipmentEndpoints
 {
-    private static readonly HashSet<string> VagueDescriptions = new(StringComparer.OrdinalIgnoreCase)
-        { "ANY", "GOODS", "ITEMS", "SAMPLES", "STUFF", "THINGS", "MISC", "MISCELLANEOUS", "PACKAGE", "PACKAGES" };
-
-    private static readonly HashSet<string> InvalidHsCodes = new(StringComparer.OrdinalIgnoreCase)
-        { "999999", "000000" };
-
     public static void MapShipmentEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/shipments").WithTags("Shipments").RequireAuthorization();
@@ -78,26 +73,10 @@ public static class ShipmentEndpoints
             if (req.CustomsItems == null || req.CustomsItems.Count == 0)
                 return Results.BadRequest(new ApiError("invalid_customs_data", "Customs items are required for parcel shipments."));
 
-            foreach (var item in req.CustomsItems)
-            {
-                if (VagueDescriptions.Contains(item.Description.Trim()))
-                    return Results.BadRequest(new ApiError("invalid_customs_data",
-                        $"Description '{item.Description}' is not specific enough. Provide the actual product name."));
-
-                if (item.Description.Trim().Length < 3)
-                    return Results.BadRequest(new ApiError("invalid_customs_data", "Customs item description must be at least 3 characters."));
-
-                if (!string.IsNullOrWhiteSpace(item.HsCode))
-                {
-                    var hs = item.HsCode.Trim();
-                    if (InvalidHsCodes.Contains(hs) || hs.Length != 6 || !hs.All(char.IsDigit))
-                        return Results.BadRequest(new ApiError("invalid_customs_data",
-                            $"HS code '{item.HsCode}' is invalid. Provide a real 6-digit HS code."));
-                }
-
-                if (item.Quantity <= 0 || item.UnitPrice <= 0)
-                    return Results.BadRequest(new ApiError("invalid_customs_data", "Customs item quantity and unit price must be greater than 0."));
-            }
+            var customsErrors = CustomsValidation.ValidateCustomsItemRequests(req.CustomsItems, requireHsCode: true);
+            if (customsErrors.Count > 0)
+                return Results.BadRequest(new ApiError("invalid_customs_data",
+                    "One or more customs items are missing required clearance details.", customsErrors));
 
             // Cross-check declared weight vs customs gross weights (only when all items have weight set)
             if (req.CustomsItems.All(i => i.GrossWeightKg.HasValue))
@@ -156,12 +135,12 @@ public static class ShipmentEndpoints
                 db.CustomsItems.Add(new CustomsItem
                 {
                     ShipmentId          = shipment.Id,
-                    Description         = item.Description.Trim(),
+                    Description         = CustomsValidation.NormalizeDescription(item.Description),
                     Quantity            = item.Quantity,
                     UnitOfMeasurement   = item.UnitOfMeasurement?.Trim() ?? "PCS",
                     UnitPrice           = item.UnitPrice,
                     Currency            = item.Currency?.ToUpper() ?? "USD",
-                    HsCode              = item.HsCode?.Trim() ?? "",
+                    HsCode              = CustomsValidation.NormalizeHsCode(item.HsCode),
                     ManufacturerCountry = item.ManufacturerCountry?.ToUpper() ?? "",
                     NetWeightKg         = item.NetWeightKg ?? 0,
                     GrossWeightKg       = item.GrossWeightKg ?? 0
@@ -406,13 +385,13 @@ public static class ShipmentEndpoints
         _                   => status.ToLower()
     };
 
-    private static string ServiceName(string productCode) =>
-        productCode.ToUpperInvariant() switch
-        {
-            "D" => "DHL Express Documents",
-            "N" => "DHL Domestic Express",
-            _ => "DHL Express Worldwide"
-        };
+    private static string ServiceName(string productCode)
+    {
+        if (DhlProductPolicy.TryGetHiddenServiceName(productCode, null, out _))
+            return "DHL service unavailable";
+
+        return "DHL Express Worldwide";
+    }
 
     private static ShipmentListItem MapToListItem(Shipment s)
     {

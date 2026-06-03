@@ -120,6 +120,10 @@ public class DhlPostalAddress
     [JsonPropertyName("addressLine3")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? AddressLine3 { get; set; }
+
+    [JsonPropertyName("countyName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CountyName { get; set; }
 }
 
 public class DhlContactInformation

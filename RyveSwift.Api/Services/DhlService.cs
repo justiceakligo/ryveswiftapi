@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using RyveSwift.Api.Common;
 using RyveSwift.Api.Dhl;
 using RyveSwift.Api.Entities;
 
@@ -39,6 +40,9 @@ public class DhlService
         originCountry = NormalizeCountryCode(originCountry);
         destCountry = NormalizeCountryCode(destCountry);
         productCode = productCode.ToUpperInvariant();
+
+        if (DhlProductPolicy.TryGetHiddenServiceName(productCode, null, out var hiddenService))
+            throw new DhlException("UNSUPPORTED_DHL_SERVICE", DhlProductPolicy.HiddenServiceMessage(hiddenService), 422);
 
         var shippingDateStr = GetNextBusinessDay(DateTime.UtcNow).ToString("yyyy-MM-dd") + "T14:00:00 GMT+00:00";
         var unitOfMeasurement = UnitOfMeasurementFor(originCountry);
@@ -107,10 +111,12 @@ public class DhlService
         var rateResponse = JsonSerializer.Deserialize<DhlRatesResponse>(responseBody, JsonOpts)
             ?? throw new DhlException("DHL_RATE_FAILED", "Empty response from DHL rates endpoint.");
 
-        // Find the matching product by code
-        var product = rateResponse.Products.FirstOrDefault(p =>
+        var allowedProducts = rateResponse.Products
+            .Where(p => !DhlProductPolicy.IsHiddenService(p))
+            .ToList();
+
+        var product = allowedProducts.FirstOrDefault(p =>
             p.ProductCode.Equals(productCode, StringComparison.OrdinalIgnoreCase))
-            ?? rateResponse.Products.FirstOrDefault()
             ?? throw new DhlException("DHL_RATE_FAILED", $"No rate returned for product code {productCode}.");
 
         // Prefer billing currency price (BILLC)
@@ -134,6 +140,20 @@ public class DhlService
         var unitOfMeasurement = UnitOfMeasurementFor(originCountry);
         var isCustomsDeclarable = IsCustomsDeclarable(productCode, originCountry, destCountry);
 
+        if (DhlProductPolicy.TryGetHiddenServiceName(productCode, null, out var hiddenService))
+            throw new DhlException("UNSUPPORTED_DHL_SERVICE", DhlProductPolicy.HiddenServiceMessage(hiddenService), 422);
+
+        if (isCustomsDeclarable)
+        {
+            if (customsItems.Count == 0)
+                throw new DhlException("INVALID_CUSTOMS_DATA", "Customs items are required for parcel shipments.", 422);
+
+            var customsErrors = CustomsValidation.ValidateCustomsItems(customsItems, requireHsCode: true);
+            if (customsErrors.Count > 0)
+                throw new DhlException("INVALID_CUSTOMS_DATA",
+                    "One or more customs items are missing required clearance details.", 422);
+        }
+
         // Build shipping date (next business day, 14:00 UTC)
         var shippingDate = GetNextBusinessDay(DateTime.UtcNow);
         var dateStr = shippingDate.ToString("yyyy-MM-ddTHH:mm:ss") + " GMT+00:00";
@@ -142,11 +162,11 @@ public class DhlService
         var lineItems = customsItems.Select((item, idx) => new DhlLineItem
         {
             Number = idx + 1,
-            Description = item.Description,
+            Description = CustomsValidation.NormalizeDescription(item.Description),
             Price = item.UnitPrice,
             PriceCurrency = NormalizeCurrency(item.Currency),
             Quantity = new DhlLineItemQuantity { Value = item.Quantity, UnitOfMeasurement = item.UnitOfMeasurement },
-            CommodityCodes = new List<DhlCommodityCode> { new() { TypeCode = "outbound", Value = item.HsCode } },
+            CommodityCodes = new List<DhlCommodityCode> { new() { TypeCode = "outbound", Value = CustomsValidation.NormalizeHsCode(item.HsCode) } },
             ManufacturerCountry = NormalizeCountryCode(item.ManufacturerCountry),
             Weight = new DhlItemWeight
             {
@@ -156,6 +176,7 @@ public class DhlService
         }).ToList();
 
         var declaredValue = customsItems.Sum(i => i.UnitPrice * i.Quantity);
+        var contentDescription = lineItems.FirstOrDefault()?.Description ?? productCode;
 
         var request = new DhlShipmentRequest
         {
@@ -184,9 +205,7 @@ public class DhlService
                 DeclaredValue = isCustomsDeclarable ? declaredValue : null,
                 DeclaredValueCurrency = isCustomsDeclarable ? NormalizeCurrency(customsItems.FirstOrDefault()?.Currency) : null,
                 UnitOfMeasurement = unitOfMeasurement,
-                Description = customsItems.Count > 0
-                    ? string.Join(", ", customsItems.Select(i => i.Description).Distinct().Take(3))
-                    : productCode,
+                Description = contentDescription,
                 Incoterm = incoterm,
                 ExportDeclaration = isCustomsDeclarable
                     ? new DhlExportDeclaration
@@ -324,7 +343,7 @@ public class DhlService
                 PostalCode = NormalizePostalCode(countryCode, address.PostalCode),
                 AddressLine1 = string.IsNullOrWhiteSpace(address.AddressLine1) ? "N/A" : address.AddressLine1.Trim(),
                 AddressLine2 = CleanOptional(address.AddressLine2),
-                AddressLine3 = CleanOptional(address.AddressLine3)
+                CountyName = CleanOptional(address.AddressLine3, maxLength: 45)
             },
             ContactInformation = new DhlContactInformation
             {
@@ -363,14 +382,10 @@ public class DhlService
         _    => "Unknown"
     };
 
-    private static string DefaultPostalCodeFor(string countryCode) => countryCode.ToUpperInvariant() switch
+    private static string? DefaultPostalCodeFor(string countryCode) => countryCode.ToUpperInvariant() switch
     {
-        "CA" => "M5V2T6",
-        "US" => "10000",
-        "GB" => "EC1A 1BB",
-        "GH" => "00233",    // Ghana placeholder
-        "NG" => "100001",   // Lagos placeholder
-        _    => "00000"
+        "AG" => "00265",
+        _    => null
     };
 
     private string GetImportAccount()
@@ -407,11 +422,11 @@ public class DhlService
 
         if (responseBody.Contains("cityDistrict", StringComparison.OrdinalIgnoreCase) ||
             responseBody.Contains("extraneous key not permitted", StringComparison.OrdinalIgnoreCase))
-            return "DHL rejected an unsupported address district field. Put suburbs or districts in addressLine3.";
+            return "DHL rejected an unsupported address district field. Put suburbs or districts in countyName.";
 
         if (responseBody.Contains("postalCode", StringComparison.OrdinalIgnoreCase) &&
             responseBody.Contains("required", StringComparison.OrdinalIgnoreCase))
-            return "DHL requires a postalCode key for every shipment address. Use 00000 for countries without postal codes.";
+            return "DHL requires a valid postalCode for this address. Use the real postal code, or a DHL-recognized service-area code where postal codes are not used.";
 
         var detail = TryReadDhlDetail(responseBody);
         return detail is null
@@ -494,25 +509,29 @@ public class DhlService
         return digits.Length >= 7 ? digits : "0000000000";
     }
 
-    private static string NormalizePostalCode(string countryCode, string? postalCode)
+    private static string? NormalizePostalCode(string countryCode, string? postalCode)
     {
         var normalizedCountry = NormalizeCountryCode(countryCode);
         var value = postalCode?.Trim();
         if (string.IsNullOrWhiteSpace(value))
             value = DefaultPostalCodeFor(normalizedCountry);
 
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var digitsOnly = new string(value.Where(char.IsDigit).ToArray());
+        if (!string.IsNullOrEmpty(digitsOnly) && digitsOnly.All(c => c == '0'))
+            return null;
+
         if (normalizedCountry == "US")
         {
-            var digits = new string(value.Where(char.IsDigit).ToArray());
-            if (string.IsNullOrEmpty(digits))
-                return "10000";
-            if (digits == "1000")
-                return "10000";
-            if (digits.Length < 5)
-                return digits.PadLeft(5, '0');
-            if (digits.Length == 5 || digits.Length == 9)
-                return digits;
-            return digits.Length > 9 ? digits[..9] : digits[..5];
+            if (string.IsNullOrEmpty(digitsOnly))
+                return null;
+            if (digitsOnly.Length < 5)
+                return digitsOnly.PadLeft(5, '0');
+            if (digitsOnly.Length == 5 || digitsOnly.Length == 9)
+                return digitsOnly;
+            return digitsOnly.Length > 9 ? digitsOnly[..9] : digitsOnly[..5];
         }
 
         if (normalizedCountry == "CA")
@@ -521,8 +540,16 @@ public class DhlService
         return value.ToUpperInvariant();
     }
 
-    private static string? CleanOptional(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private static string? CleanOptional(string? value, int? maxLength = null)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var cleaned = value.Trim();
+        return maxLength.HasValue && cleaned.Length > maxLength.Value
+            ? cleaned[..maxLength.Value]
+            : cleaned;
+    }
 
     private static bool IsPlaceholder(string? value) =>
         string.IsNullOrWhiteSpace(value) ||

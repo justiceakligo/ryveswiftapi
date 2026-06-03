@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using RyveSwift.Api.Common;
 using RyveSwift.Api.Data;
+using RyveSwift.Api.Dhl;
 using RyveSwift.Api.Dtos;
 using RyveSwift.Api.Entities;
 using RyveSwift.Api.Services;
@@ -1010,10 +1011,13 @@ public static class AdminEndpoints
     private static decimal GetShipmentWeight(Shipment shipment) =>
         shipment.Packages.Sum(p => p.WeightKg);
 
-    private static string GetServiceName(string productCode) =>
-        productCode.Equals("D", StringComparison.OrdinalIgnoreCase)
-            ? "DHL Express Documents"
-            : "DHL Express Worldwide";
+    private static string GetServiceName(string productCode)
+    {
+        if (DhlProductPolicy.TryGetHiddenServiceName(productCode, null, out _))
+            return "DHL service unavailable";
+
+        return "DHL Express Worldwide";
+    }
 
     private static decimal Money(decimal value) =>
         Math.Round(value, 2, MidpointRounding.AwayFromZero);
@@ -1064,13 +1068,17 @@ public static class AdminEndpoints
         if (req.MarkupPercent < 0)
             return Results.BadRequest(new ApiError("VALIDATION_FAILED", "Markup percent cannot be negative."));
 
+        var productCode = NormalizeMarkupProductCode(req.ProductCode);
+        if (productCode.Error is not null)
+            return productCode.Error;
+
         var rule = new MarkupRule
         {
             OriginCountry = req.OriginCountry?.ToUpper(),
             DestinationCountry = req.DestinationCountry?.ToUpper(),
             MinWeightKg = req.MinWeightKg,
             MaxWeightKg = req.MaxWeightKg,
-            ProductCode = req.ProductCode?.ToUpper(),
+            ProductCode = productCode.Value,
             MarkupPercent = req.MarkupPercent,
             PlatformFee = req.PlatformFee,
             IsActive = true
@@ -1093,11 +1101,15 @@ public static class AdminEndpoints
         if (req.MarkupPercent < 0)
             return Results.BadRequest(new ApiError("VALIDATION_FAILED", "Markup percent cannot be negative."));
 
+        var productCode = NormalizeMarkupProductCode(req.ProductCode);
+        if (productCode.Error is not null)
+            return productCode.Error;
+
         rule.OriginCountry = req.OriginCountry?.ToUpper();
         rule.DestinationCountry = req.DestinationCountry?.ToUpper();
         rule.MinWeightKg = req.MinWeightKg;
         rule.MaxWeightKg = req.MaxWeightKg;
-        rule.ProductCode = req.ProductCode?.ToUpper();
+        rule.ProductCode = productCode.Value;
         rule.MarkupPercent = req.MarkupPercent;
         rule.PlatformFee = req.PlatformFee;
 
@@ -1115,6 +1127,22 @@ public static class AdminEndpoints
         rule.IsActive = false;
         await db.SaveChangesAsync();
         return Results.NoContent();
+    }
+
+    private static (string? Value, IResult? Error) NormalizeMarkupProductCode(string? productCode)
+    {
+        if (string.IsNullOrWhiteSpace(productCode))
+            return (null, null);
+
+        var normalized = productCode.Trim().ToUpperInvariant();
+        if (normalized == "P")
+            return (normalized, null);
+
+        var message = DhlProductPolicy.TryGetHiddenServiceName(normalized, null, out var serviceName)
+            ? DhlProductPolicy.HiddenServiceMessage(serviceName)
+            : "Only DHL Express Worldwide product code P is supported by this certified integration.";
+
+        return (null, Results.BadRequest(new ApiError("VALIDATION_FAILED", message)));
     }
 
     private static async Task<IResult> GetDhlFailures(AppDbContext db, int limit = 50)

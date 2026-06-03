@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using RyveSwift.Api.Common;
 using RyveSwift.Api.Data;
+using RyveSwift.Api.Dhl;
 using RyveSwift.Api.Dtos;
 using RyveSwift.Api.Entities;
 using RyveSwift.Api.Services;
@@ -75,8 +76,14 @@ public static class QuoteEndpoints
         // --- Customs (for parcels) ---
         var isInternational = !originCountry.Equals(destCountry, StringComparison.OrdinalIgnoreCase);
         var isDocuments = req.ShipmentType?.Equals("documents", StringComparison.OrdinalIgnoreCase) == true;
-        var productCode = !isInternational ? "N" : isDocuments ? "D" : "P";
+        var productCode = "P";
         var incoterm = NormalizeIncoterm(req.Incoterm);
+
+        if (isDocuments)
+            errors.Add(new("shipmentType", "Only parcel shipments using DHL Express Worldwide are supported by this certified integration."));
+
+        if (!isInternational)
+            errors.Add(new("destination.country", DhlProductPolicy.HiddenServiceMessage("DHL Domestic Express")));
 
         if (incoterm == "DDP" && !isInternational)
             errors.Add(new("incoterm", "DDP can only be used for international shipments."));
@@ -162,7 +169,10 @@ public static class QuoteEndpoints
         catch (DhlException ex)
         {
             return Results.Json(new ApiError(ex.ErrorCode, ex.Message),
-                statusCode: ex.IsClientError || ex.ErrorCode == "UNSUPPORTED_ROUTE" ? 422 : 503);
+                statusCode: ex.IsClientError ||
+                    ex.ErrorCode is "UNSUPPORTED_ROUTE" or "UNSUPPORTED_DHL_SERVICE"
+                        ? 422
+                        : 503);
         }
     }
 
@@ -188,12 +198,9 @@ public static class QuoteEndpoints
 
     private static QuoteResponse BuildResponse(Quote q, decimal shippingSubtotal, decimal ryveFee, bool expired = false)
     {
-        var service = q.ProductCode.ToUpperInvariant() switch
-        {
-            "D" => "DHL Express Documents",
-            "N" => "DHL Domestic Express",
-            _ => "DHL Express Worldwide"
-        };
+        if (DhlProductPolicy.TryGetHiddenServiceName(q.ProductCode, null, out _))
+            return new QuoteResponse(q.Id, "DHL service unavailable", q.Currency, q.TotalAmount,
+                new EtaBusinessDays(3, 5), q.ExpiresAt, expired ? null : new QuoteBreakdown(shippingSubtotal, 0m, ryveFee), expired);
 
         var eta = q.ProductCode.ToUpperInvariant() switch
         {
@@ -204,7 +211,7 @@ public static class QuoteEndpoints
 
         var breakdown = expired ? null : new QuoteBreakdown(shippingSubtotal, 0m, ryveFee);
 
-        return new QuoteResponse(q.Id, service, q.Currency, q.TotalAmount, eta, q.ExpiresAt, breakdown, expired);
+        return new QuoteResponse(q.Id, "DHL Express Worldwide", q.Currency, q.TotalAmount, eta, q.ExpiresAt, breakdown, expired);
     }
 
     private static Guid? TryGetUserId(HttpContext ctx)

@@ -34,7 +34,13 @@ public class DhlRatesRequest
     public bool IsCustomsDeclarable { get; set; } = true;
 
     [JsonPropertyName("nextBusinessDay")]
-    public bool NextBusinessDay { get; set; } = true;
+    public bool NextBusinessDay { get; set; } = false;
+
+    [JsonPropertyName("requestAllValueAddedServices")]
+    public bool RequestAllValueAddedServices { get; set; } = false;
+
+    [JsonPropertyName("returnStandardProductsOnly")]
+    public bool ReturnStandardProductsOnly { get; set; } = true;
 
     [JsonPropertyName("plannedShippingDateAndTime")]
     public string? PlannedShippingDateAndTime { get; set; }
@@ -52,7 +58,8 @@ public class DhlRateCustomerDetails
 public class DhlRateAddressDetails
 {
     [JsonPropertyName("postalCode")]
-    public string PostalCode { get; set; } = "00000";
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PostalCode { get; set; }
 
     [JsonPropertyName("cityName")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

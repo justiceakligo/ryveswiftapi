@@ -107,15 +107,10 @@ public static class BookingEndpoints
         // Parcels require a real HS code on every line item
         if (needsCustoms)
         {
-            var missingHs = customsItems
-                .Select((ci, i) => (ci, i))
-                .Where(x => string.IsNullOrWhiteSpace(x.ci.HsCode))
-                .Select(x => new FieldError($"customsItems[{x.i}].hsCode",
-                    "HS code is required for parcel customs items. Find yours at hts.usitc.gov or trade-tariff.service.gov.uk."))
-                .ToList();
-            if (missingHs.Count > 0)
+            var customsErrors = CustomsValidation.ValidateCustomsItemRequests(customsItems, requireHsCode: true);
+            if (customsErrors.Count > 0)
                 return Results.BadRequest(new ApiError("validation_failed",
-                    "One or more customs items are missing an HS code.", missingHs));
+                    "One or more customs items are missing required clearance details.", customsErrors));
         }
 
         var exportReason = req.ExportReason ?? quote.CustomsReason ?? "sale";
@@ -162,12 +157,12 @@ public static class BookingEndpoints
             db.CustomsItems.Add(new CustomsItem
             {
                 ShipmentId          = shipment.Id,
-                Description         = ci.Description,
+                Description         = CustomsValidation.NormalizeDescription(ci.Description),
                 Quantity            = ci.Quantity,
                 UnitOfMeasurement   = ci.UnitOfMeasurement ?? "PCS",
                 UnitPrice           = ci.UnitPrice,
                 Currency            = ci.Currency ?? quote.Currency,
-                HsCode              = ci.HsCode!,
+                HsCode              = CustomsValidation.NormalizeHsCode(ci.HsCode),
                 ManufacturerCountry = ci.ManufacturerCountry ?? senderAddress.CountryCode,
                 NetWeightKg         = ci.NetWeightKg ?? (quote.WeightKg / Math.Max(ci.Quantity, 1)),
                 GrossWeightKg       = ci.GrossWeightKg ?? (quote.WeightKg / Math.Max(ci.Quantity, 1)),
