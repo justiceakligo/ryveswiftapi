@@ -86,6 +86,7 @@ builder.Services.AddSingleton(sp =>
     new ConfigService(dbConfig, sp.GetRequiredService<IServiceScopeFactory>()));
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<DhlService>();
+builder.Services.AddScoped<LocationSuggestionService>();
 builder.Services.AddScoped<StripeService>();
 builder.Services.AddScoped<MarkupService>();
 builder.Services.AddScoped<SpacesStorageService>();
@@ -165,6 +166,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok", timestamp = DateTime
 app.MapAuthEndpoints();
 app.MapUserEndpoints();
 app.MapAddressEndpoints();
+app.MapLocationEndpoints();
 app.MapQuoteEndpoints();
 app.MapShipmentEndpoints();
 app.MapPaymentEndpoints();

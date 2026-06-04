@@ -266,6 +266,53 @@ public class DhlService
             ?? new DhlTrackingResponse();
     }
 
+    // ─── Address Validation ────────────────────────────────────────────────
+
+    public async Task<DhlAddressValidationResponse> ValidateAddressAsync(
+        string countryCode,
+        string postalCode,
+        string? cityName,
+        string role,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedCountry = NormalizeCountryCode(countryCode);
+        var normalizedPostalCode = NormalizePostalCode(normalizedCountry, postalCode);
+        var type = role.Equals("origin", StringComparison.OrdinalIgnoreCase) ? "pickup" : "delivery";
+
+        if (string.IsNullOrWhiteSpace(normalizedCountry))
+            throw new DhlException("DHL_ADDRESS_VALIDATE_FAILED", "Country code is required for DHL address validation.", 422);
+        if (string.IsNullOrWhiteSpace(normalizedPostalCode))
+            throw new DhlException("DHL_ADDRESS_VALIDATE_FAILED", "Postal code is required for DHL address validation.", 422);
+
+        var query = new List<string>
+        {
+            $"type={Uri.EscapeDataString(type)}",
+            $"countryCode={Uri.EscapeDataString(normalizedCountry)}",
+            $"postalCode={Uri.EscapeDataString(normalizedPostalCode)}",
+            "strictValidation=true"
+        };
+
+        if (!string.IsNullOrWhiteSpace(cityName))
+            query.Add($"cityName={Uri.EscapeDataString(cityName.Trim())}");
+
+        var client = CreateAuthenticatedClient();
+        var url = "address-validate?" + string.Join("&", query);
+
+        _logger.LogInformation("Calling DHL /address-validate for {Country} {PostalCode}", normalizedCountry, normalizedPostalCode);
+
+        var response = await client.GetAsync(url, cancellationToken);
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("DHL /address-validate returned {Status}: {Body}", response.StatusCode, responseBody);
+            throw BuildDhlException("DHL_ADDRESS_VALIDATE_FAILED", "address validation", response.StatusCode, responseBody);
+        }
+
+        return JsonSerializer.Deserialize<DhlAddressValidationResponse>(responseBody, JsonOpts)
+            ?? new DhlAddressValidationResponse();
+    }
+
     // ─── Helpers ───────────────────────────────────────────────────────────
 
     private HttpClient CreateAuthenticatedClient()

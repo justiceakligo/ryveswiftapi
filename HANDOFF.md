@@ -346,6 +346,55 @@ Supported routes: `CA → GH`, `CA → NG`, `US → GH`, `US → NG`.
 
 ---
 
+### Locations
+
+#### `GET /api/locations/postal-suggestions` — Public
+
+Returns non-blocking postal/service-area suggestions for quote address entry.
+
+**Query**
+```http
+GET /api/locations/postal-suggestions?country=GH&city=Accra&postalCode=Accra&role=destination
+```
+
+`country` is required. `role` can be `origin` or `destination`; unknown values are treated as `destination`.
+
+**Response 200**
+```json
+{
+  "status": "ok",
+  "typed": {
+    "kind": "typed",
+    "label": "Use what I typed",
+    "country": "GH",
+    "city": "Accra",
+    "postalCode": "Accra",
+    "source": "user",
+    "carrierRecognized": false
+  },
+  "recommendations": [
+    {
+      "id": "postal-gh-accra",
+      "kind": "recommended",
+      "label": "Accra, Ghana",
+      "country": "GH",
+      "city": "Accra",
+      "postalCode": "GA184",
+      "serviceAreaCode": "GA184",
+      "confidence": 0.74,
+      "source": "curated_postal_hint",
+      "carrierRecognized": false
+    }
+  ],
+  "warnings": null,
+  "message": null
+}
+```
+
+Possible `status` values: `ok`, `ambiguous`, `no_match`, `unavailable`.
+
+---
+
 ### Payments
 
 #### `POST /api/payments/create-intent` — Auth required
