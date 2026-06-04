@@ -227,7 +227,7 @@ Rate-limited: 10 req/min.
   "phone": "+233-24-555-0188",
   "countryCode": "GH",
   "cityName": "Accra",
-  "postalCode": null,
+  "postalCode": "GA184",
   "addressLine1": "14 Independence Avenue",
   "addressLine2": null,
   "addressLine3": null,
@@ -271,6 +271,7 @@ Supported routes: `CA → GH`, `CA → NG`, `US → GH`, `US → NG`.
   },
   "destination": {
     "country": "GH",
+    "postalCode": "GA184",
     "city": "Accra"
   },
   "shipmentType": "parcel",
@@ -315,7 +316,7 @@ Supported routes: `CA → GH`, `CA → NG`, `US → GH`, `US → NG`.
 ```json
 {
   "origin": { "country": "CA", "postalCode": "M5V 3A1" },
-  "destination": { "country": "NG", "city": "Lagos" },
+  "destination": { "country": "NG", "postalCode": "100001", "city": "Lagos" },
   "shipmentType": "documents",
   "pieces": 1,
   "weightKg": 0.3,

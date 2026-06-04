@@ -46,6 +46,12 @@ public static class QuoteEndpoints
         var originCountry = req.Origin?.Country?.ToUpperInvariant() ?? "";
         var destCountry   = req.Destination?.Country?.ToUpperInvariant() ?? "";
 
+        if (RequiresPostalCodeForDhlRate(originCountry) && string.IsNullOrWhiteSpace(req.Origin?.PostalCode))
+            errors.Add(new("origin.postalCode", "A postal code is required for DHL rates from this origin country."));
+
+        if (RequiresPostalCodeForDhlRate(destCountry) && string.IsNullOrWhiteSpace(req.Destination?.PostalCode))
+            errors.Add(new("destination.postalCode", "A postal code or DHL-recognized service-area code is required for DHL rates to this destination country."));
+
         // --- Pieces ---
         if (req.Pieces < 1 || req.Pieces > 50)
             errors.Add(new("pieces", "Pieces must be between 1 and 50."));
@@ -247,4 +253,11 @@ public static class QuoteEndpoints
 
     private static bool IsValidCurrency(string currency) =>
         currency.Length == 3 && currency.All(char.IsLetter);
+
+    private static bool RequiresPostalCodeForDhlRate(string countryCode) =>
+        countryCode.ToUpperInvariant() switch
+        {
+            "CA" or "US" or "GH" or "NG" => true,
+            _ => false
+        };
 }

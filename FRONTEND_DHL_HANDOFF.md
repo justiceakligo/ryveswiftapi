@@ -57,6 +57,7 @@ Description rules:
 
 - Do not auto-fill or send `00000` postal codes.
 - Ask for a real postal code where the destination country uses postal codes.
+- For Ghana and Nigeria quote requests, send `postalCode`; DHL requires a real postal code or DHL-recognized service-area code for those rate lookups.
 - For countries without postal codes, allow the postal code field to be blank or let the user enter a DHL-recognized service-area code.
 - Keep using the existing `addressLine3` DTO field if needed, but label it in the UI as `County / Suburb / District`.
 - Do not label `addressLine3` as a normal street address line for DHL shipments. The backend maps it to DHL `countyName`.
