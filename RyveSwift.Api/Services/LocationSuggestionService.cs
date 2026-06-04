@@ -133,9 +133,9 @@ public class LocationSuggestionService
             {
                 var country = NormalizeCountry(string.IsNullOrWhiteSpace(a.CountryCode) ? fallbackCountry : a.CountryCode);
                 var city = Clean(a.CityName) ?? "";
-                var postal = Clean(a.PostalCode) ?? "";
                 var province = Clean(a.ProvinceCode) ?? Clean(a.ProvinceName);
                 var serviceAreaCode = Clean(a.ServiceArea?.Code);
+                var postal = Clean(a.PostalCode) ?? serviceAreaCode ?? "";
                 var labelParts = new[] { city, province, CountryName(country) }.Where(p => !string.IsNullOrWhiteSpace(p));
 
                 return new LocationSuggestion(
