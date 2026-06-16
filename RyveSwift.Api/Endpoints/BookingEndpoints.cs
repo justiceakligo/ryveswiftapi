@@ -27,6 +27,7 @@ public static class BookingEndpoints
         AppDbContext db,
         StripeService stripe,
         DhlService dhl,
+        RyvePoolDispatchCoordinator ryvePoolDispatch,
         SpacesStorageService spaces,
         ILogger<Program> logger,
         NotificationEmailService emails)
@@ -40,16 +41,19 @@ public static class BookingEndpoints
 
         if (existingShipment is not null)
         {
-            return Results.Ok(BuildConfirmResponse(existingShipment, db));
+            return Results.Ok(await BuildConfirmResponseAsync(existingShipment, db));
         }
 
         // ── 2. Load and validate quote ────────────────────────────────────────
         var quote = await db.Quotes.FirstOrDefaultAsync(q => q.Id == req.QuoteId);
-        if (quote is null)
+        if (quote is null || (quote.UserId.HasValue && quote.UserId.Value != userId))
             return Results.NotFound(new ApiError("not_found", "Quote not found."));
 
         if (quote.ExpiresAt < DateTime.UtcNow)
             return Results.Conflict(new ApiError("quote_expired", "Quote has expired. Please request a new one."));
+
+        if (!quote.UserId.HasValue)
+            quote.UserId = userId;
 
         // ── 3. Verify PaymentIntent status ────────────────────────────────────
         Stripe.PaymentIntent pi;
@@ -194,11 +198,28 @@ public static class BookingEndpoints
             await ShipmentEndpoints.BookDhlShipmentAsync(fullShipment, db, dhl, spaces, logger);
             await db.SaveChangesAsync();
 
+            RyvePoolDelivery? orderDelivery = null;
+            try
+            {
+                orderDelivery = await ryvePoolDispatch.CreateShipmentDeliveryAsync(quote, fullShipment, userId, ctx.RequestAborted);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "RyvePool delivery add-on failed after DHL booking for shipment {Id}", shipment.Id);
+                db.ShipmentEvents.Add(new ShipmentEvent
+                {
+                    ShipmentId = shipment.Id,
+                    EventType = "RyvePoolDeliveryFailed",
+                    Description = ex.Message
+                });
+                await db.SaveChangesAsync();
+            }
+
             // Return success
             var reloaded = await db.Shipments.Include(s => s.Packages).FirstAsync(s => s.Id == shipment.Id);
             var user = await db.Users.FindAsync(userId);
             await emails.SendShipmentLabelCreatedAsync(reloaded, user);
-            return Results.Ok(BuildConfirmResponse(reloaded, db));
+            return Results.Ok(await BuildConfirmResponseAsync(reloaded, db, orderDelivery));
         }
         catch (DhlException ex) when (ex.IsClientError)
         {
@@ -221,7 +242,7 @@ public static class BookingEndpoints
             await emails.SendBookingFailureAsync(shipment, user, ex.Message, refundId);
 
             return Results.UnprocessableEntity(new BookingConfirmResponse(
-                shipment.Id, null, "failed", new(), refundId));
+                shipment.Id, null, "failed", new(), null, refundId));
         }
         catch (DhlException ex)
         {
@@ -237,7 +258,10 @@ public static class BookingEndpoints
 
     // ─── Helpers ───────────────────────────────────────────────────────────
 
-    private static BookingConfirmResponse BuildConfirmResponse(Shipment s, AppDbContext db)
+    private static async Task<BookingConfirmResponse> BuildConfirmResponseAsync(
+        Shipment s,
+        AppDbContext db,
+        RyvePoolDelivery? orderDelivery = null)
     {
         var baseUrl = $"/api/shipments/{s.Id}/documents";
         var docs = new List<DocumentInfo>
@@ -247,8 +271,50 @@ public static class BookingEndpoints
             new("waybill", $"{baseUrl}/waybill", s.WaybillFilePath is not null),
         };
 
-        return new BookingConfirmResponse(s.Id, s.TrackingNumber, MapStatus(s.Status), docs, null);
+        orderDelivery ??= await db.RyvePoolDeliveries
+            .AsNoTracking()
+            .FirstOrDefaultAsync(d => d.ShipmentId == s.Id || d.QuoteId == s.QuoteId);
+
+        return new BookingConfirmResponse(
+            s.Id,
+            s.TrackingNumber,
+            MapStatus(s.Status),
+            docs,
+            orderDelivery is null ? null : MapOrderDelivery(orderDelivery),
+            null);
     }
+
+    private static RyvePoolDeliveryResponse MapOrderDelivery(RyvePoolDelivery d) => new(
+        d.Id,
+        d.QuoteId,
+        d.ShipmentId,
+        d.Environment,
+        d.ExternalOrderId,
+        d.RyvePoolDispatchId,
+        d.Status,
+        d.TrackingUrl,
+        d.RegionCode,
+        d.ExternalBranchId,
+        d.DispatchModeUsed,
+        d.PaymentType,
+        d.CodAmountMinor,
+        d.PackageType,
+        d.Currency,
+        d.DeliveryFeeMinor,
+        d.PlatformFeeMinor,
+        d.RyvePoolCommissionMinor,
+        d.DriverPayoutMinor,
+        d.CanCancel,
+        d.CancellableUntil,
+        d.DispatchTiming,
+        d.ScheduledForUtc,
+        d.DispatchAttemptCount,
+        d.LastDispatchAttemptAt,
+        d.LastDispatchError,
+        d.DhlPointId,
+        d.DhlPointName,
+        d.CreatedAt,
+        d.UpdatedAt);
 
     private static List<CustomsItemRequest> BuildDefaultCustomsItems(Quote quote)
     {

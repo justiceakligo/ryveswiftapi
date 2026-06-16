@@ -19,6 +19,8 @@ public class AppDbContext : DbContext
     public DbSet<ShipmentEvent> ShipmentEvents => Set<ShipmentEvent>();
     public DbSet<AppConfig> AppConfigs => Set<AppConfig>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+    public DbSet<RyvePoolDelivery> RyvePoolDeliveries => Set<RyvePoolDelivery>();
+    public DbSet<RyvePoolWebhookEvent> RyvePoolWebhookEvents => Set<RyvePoolWebhookEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -63,6 +65,7 @@ public class AppDbContext : DbContext
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.RawDhlRateResponse).HasColumnType("jsonb");
+            e.Property(x => x.RyvePoolDeliveryQuoteRawResponse).HasColumnType("jsonb");
             e.HasOne(x => x.User).WithMany(u => u.Quotes)
                 .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.SetNull);
         });
@@ -128,6 +131,32 @@ public class AppDbContext : DbContext
         {
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.Key).IsUnique();
+        });
+
+        // RyvePoolDeliveries
+        modelBuilder.Entity<RyvePoolDelivery>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.Environment, x.ExternalOrderId }).IsUnique();
+            e.HasIndex(x => x.RyvePoolDispatchId);
+            e.HasIndex(x => x.QuoteId);
+            e.HasIndex(x => x.ShipmentId);
+            e.HasOne(x => x.User).WithMany()
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.Quote).WithMany()
+                .HasForeignKey(x => x.QuoteId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.Shipment).WithMany()
+                .HasForeignKey(x => x.ShipmentId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // RyvePoolWebhookEvents
+        modelBuilder.Entity<RyvePoolWebhookEvent>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.RyvePoolEventId).IsUnique().HasFilter("\"RyvePoolEventId\" IS NOT NULL");
+            e.HasIndex(x => new { x.Environment, x.DispatchId });
+            e.HasOne(x => x.Delivery).WithMany(d => d.WebhookEvents)
+                .HasForeignKey(x => x.DeliveryId).OnDelete(DeleteBehavior.SetNull);
         });
     }
 }

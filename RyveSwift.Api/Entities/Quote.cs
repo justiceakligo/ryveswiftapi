@@ -23,6 +23,35 @@ public class Quote
     public decimal TotalAmount { get; set; }
     public string Currency { get; set; } = "CAD";
     public string? RawDhlRateResponse { get; set; }
+    public bool RyvePoolDeliverySelected { get; set; }
+    public string? RyvePoolDeliveryStatus { get; set; }
+    public string? RyvePoolDeliveryDispatchTiming { get; set; }
+    public DateTime? RyvePoolDeliveryScheduledForUtc { get; set; }
+    public long RyvePoolDeliveryFeeMinor { get; set; }
+    public string? RyvePoolDeliveryCurrency { get; set; }
+    public string? RyvePoolDeliveryQuoteRawResponse { get; set; }
+    public string? RyvePoolPickupName { get; set; }
+    public string? RyvePoolPickupPhone { get; set; }
+    public string? RyvePoolPickupAddress { get; set; }
+    public string? RyvePoolPickupLandmark { get; set; }
+    public decimal? RyvePoolPickupLat { get; set; }
+    public decimal? RyvePoolPickupLng { get; set; }
+    public string? RyvePoolDropoffName { get; set; }
+    public string? RyvePoolDropoffPhone { get; set; }
+    public string? RyvePoolDropoffEmail { get; set; }
+    public string? RyvePoolDropoffAddress { get; set; }
+    public string? RyvePoolDropoffLandmark { get; set; }
+    public decimal? RyvePoolDropoffLat { get; set; }
+    public decimal? RyvePoolDropoffLng { get; set; }
+    public string? RyvePoolDhlPointId { get; set; }
+    public string? RyvePoolDhlPointName { get; set; }
+    public string? RyvePoolRegionCode { get; set; }
+    public string? RyvePoolExternalBranchId { get; set; }
+    public string? RyvePoolDispatchMode { get; set; }
+    public string? RyvePoolPackageType { get; set; }
+    public decimal? RyvePoolParcelWeightKg { get; set; }
+    public string? RyvePoolDriverInstructions { get; set; }
+    public string? RyvePoolVehicleCategoryId { get; set; }
     public int Pieces { get; set; } = 1;
     public string? CustomsCategory { get; set; }
     public decimal? CustomsDeclaredValue { get; set; }

@@ -42,6 +42,7 @@ public record BookingConfirmResponse(
     string? TrackingNumber,
     string Status,
     List<DocumentInfo> Documents,
+    RyvePoolDeliveryResponse? OrderDelivery = null,
     string? RefundId = null);
 
 // ─── Shipment list (GET /api/shipments) ─────────────────────────────────────
@@ -74,7 +75,8 @@ public record ShipmentDetailResponse(
     ShipmentPaymentInfo? Payment,
     decimal TotalAmount,
     string Currency,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    RyvePoolDeliveryResponse? OrderDelivery = null);
 
 // ─── Legacy internal shapes (used by admin / create-label endpoints) ─────────
 

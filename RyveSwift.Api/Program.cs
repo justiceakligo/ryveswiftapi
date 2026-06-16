@@ -75,6 +75,7 @@ builder.Services.AddRateLimiter(options =>
 
 // HTTP clients
 builder.Services.AddHttpClient("dhl");
+builder.Services.AddHttpClient("ryvepool");
 builder.Services.AddHttpClient("resend", client =>
 {
     client.BaseAddress = new Uri("https://api.resend.com/");
@@ -86,6 +87,8 @@ builder.Services.AddSingleton(sp =>
     new ConfigService(dbConfig, sp.GetRequiredService<IServiceScopeFactory>()));
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<DhlService>();
+builder.Services.AddScoped<RyvePoolService>();
+builder.Services.AddScoped<RyvePoolDispatchCoordinator>();
 builder.Services.AddScoped<LocationSuggestionService>();
 builder.Services.AddScoped<StripeService>();
 builder.Services.AddScoped<MarkupService>();
@@ -94,6 +97,7 @@ builder.Services.AddScoped<IEmailService, EmailDispatcher>();
 builder.Services.AddScoped<EmailPreferenceTokenService>();
 builder.Services.AddScoped<NotificationEmailService>();
 builder.Services.AddHostedService<TrackingPollingService>();
+builder.Services.AddHostedService<RyvePoolScheduledDispatchWorker>();
 
 // OpenAPI / Scalar
 builder.Services.AddOpenApi();
@@ -173,6 +177,8 @@ app.MapPaymentEndpoints();
 app.MapEmailPreferenceEndpoints();
 app.MapTrackingEndpoints();
 app.MapBookingEndpoints();
+app.MapRyvePoolDeliveryEndpoints();
+app.MapAdminRyvePoolEndpoints();
 app.MapAdminEndpoints();
 
 app.Run();

@@ -50,6 +50,25 @@ public static class DatabaseSeeder
 
         // Tracking
         new() { Key = "TRACKING_POLL_INTERVAL_MINUTES", Value = "30", Description = "Interval in minutes for background tracking sync" },
+
+        // RyvePool order delivery integration
+        new() { Key = "RYVEPOOL_ENABLED", Value = "false", Description = "Enable RyvePool order delivery integration." },
+        new() { Key = "RYVEPOOL_ENVIRONMENT", Value = "test", Description = "Active RyvePool environment: test or production." },
+        new() { Key = "RYVEPOOL_BASE_URL", Value = "https://api.ryvepool.com/v1", Description = "RyvePool Partner Delivery API base URL." },
+        new() { Key = "RYVEPOOL_TIMEOUT_SECONDS", Value = "20", Description = "HTTP timeout in seconds for RyvePool API calls." },
+        new() { Key = "RYVEPOOL_DEFAULT_REGION_CODE", Value = "CA-ON", Description = "Default RyvePool region code for order delivery quotes." },
+        new() { Key = "RYVEPOOL_DEFAULT_EXTERNAL_BRANCH_ID", Value = "", Description = "Default RyvePool external branch ID for dispatch creation." },
+        new() { Key = "RYVEPOOL_DEFAULT_DISPATCH_MODE", Value = "ryvepool_marketplace", Description = "Default dispatch mode: own_fleet, ryvepool_marketplace, or overflow." },
+        new() { Key = "RYVEPOOL_DEFAULT_PACKAGE_TYPE", Value = "parcel", Description = "Default package type for RyvePool order delivery. Food is intentionally disabled." },
+        new() { Key = "RYVEPOOL_WEBHOOK_SIGNATURE_REQUIRED", Value = "true", Description = "Require valid HMAC signatures on RyvePool webhooks." },
+        new() { Key = "RYVEPOOL_SCHEDULED_DISPATCH_ENABLED", Value = "true", Description = "Enable background dispatch of scheduled RyvePool order deliveries." },
+        new() { Key = "RYVEPOOL_SCHEDULED_DISPATCH_INTERVAL_SECONDS", Value = "60", Description = "Interval in seconds for scheduled RyvePool dispatch processing." },
+        new() { Key = "RYVEPOOL_TEST_PUBLIC_KEY", Value = "PLACEHOLDER_RYVEPOOL_TEST_PUBLIC_KEY", Description = "RyvePool test public key.", IsSecret = true },
+        new() { Key = "RYVEPOOL_TEST_SECRET_KEY", Value = "PLACEHOLDER_RYVEPOOL_TEST_SECRET_KEY", Description = "RyvePool test secret key.", IsSecret = true },
+        new() { Key = "RYVEPOOL_TEST_WEBHOOK_SECRET", Value = "PLACEHOLDER_RYVEPOOL_TEST_WEBHOOK_SECRET", Description = "RyvePool test webhook signing secret.", IsSecret = true },
+        new() { Key = "RYVEPOOL_PRODUCTION_PUBLIC_KEY", Value = "PLACEHOLDER_RYVEPOOL_PRODUCTION_PUBLIC_KEY", Description = "RyvePool production public key.", IsSecret = true },
+        new() { Key = "RYVEPOOL_PRODUCTION_SECRET_KEY", Value = "PLACEHOLDER_RYVEPOOL_PRODUCTION_SECRET_KEY", Description = "RyvePool production secret key.", IsSecret = true },
+        new() { Key = "RYVEPOOL_PRODUCTION_WEBHOOK_SECRET", Value = "PLACEHOLDER_RYVEPOOL_PRODUCTION_WEBHOOK_SECRET", Description = "RyvePool production webhook signing secret.", IsSecret = true },
     };
 
     public static async Task SeedAsync(AppDbContext context)

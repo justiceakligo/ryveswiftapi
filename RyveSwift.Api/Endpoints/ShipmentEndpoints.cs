@@ -176,7 +176,11 @@ public static class ShipmentEndpoints
         if (shipment is null)
             return Results.NotFound(new ApiError("not_found", "Shipment not found."));
 
-        return Results.Ok(MapToDetailResponse(shipment));
+        var orderDelivery = await db.RyvePoolDeliveries
+            .AsNoTracking()
+            .FirstOrDefaultAsync(d => d.ShipmentId == shipment.Id || d.QuoteId == shipment.QuoteId);
+
+        return Results.Ok(MapToDetailResponse(shipment, orderDelivery));
     }
 
     private static async Task<IResult> GetMyShipments(HttpContext ctx, AppDbContext db)
@@ -406,7 +410,7 @@ public static class ShipmentEndpoints
             s.TrackingNumber);
     }
 
-    private static ShipmentDetailResponse MapToDetailResponse(Shipment s)
+    private static ShipmentDetailResponse MapToDetailResponse(Shipment s, RyvePoolDelivery? orderDelivery = null)
     {
         var baseUrl = $"/api/shipments/{s.Id}/documents";
         var docs = new List<DocumentInfo>();
@@ -432,8 +436,41 @@ public static class ShipmentEndpoints
             paymentInfo,
             s.TotalAmount,
             s.Currency,
-            s.CreatedAt);
+            s.CreatedAt,
+            orderDelivery is null ? null : MapOrderDelivery(orderDelivery));
     }
+
+    private static RyvePoolDeliveryResponse MapOrderDelivery(RyvePoolDelivery d) => new(
+        d.Id,
+        d.QuoteId,
+        d.ShipmentId,
+        d.Environment,
+        d.ExternalOrderId,
+        d.RyvePoolDispatchId,
+        d.Status,
+        d.TrackingUrl,
+        d.RegionCode,
+        d.ExternalBranchId,
+        d.DispatchModeUsed,
+        d.PaymentType,
+        d.CodAmountMinor,
+        d.PackageType,
+        d.Currency,
+        d.DeliveryFeeMinor,
+        d.PlatformFeeMinor,
+        d.RyvePoolCommissionMinor,
+        d.DriverPayoutMinor,
+        d.CanCancel,
+        d.CancellableUntil,
+        d.DispatchTiming,
+        d.ScheduledForUtc,
+        d.DispatchAttemptCount,
+        d.LastDispatchAttemptAt,
+        d.LastDispatchError,
+        d.DhlPointId,
+        d.DhlPointName,
+        d.CreatedAt,
+        d.UpdatedAt);
 
     private static ShipmentResponse MapToSummaryResponse(Shipment s) => new(
         s.Id, s.UserId, s.TrackingNumber, MapStatus(s.Status),

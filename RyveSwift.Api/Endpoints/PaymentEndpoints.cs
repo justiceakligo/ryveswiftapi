@@ -40,11 +40,17 @@ public static class PaymentEndpoints
         var idempotencyKey = ctx.Request.Headers["Idempotency-Key"].ToString();
 
         var quote = await db.Quotes.FirstOrDefaultAsync(q => q.Id == req.QuoteId);
-        if (quote is null)
+        if (quote is null || (quote.UserId.HasValue && quote.UserId.Value != userId))
             return Results.NotFound(new ApiError("not_found", "Quote not found."));
 
         if (quote.ExpiresAt < DateTime.UtcNow)
             return Results.Conflict(new ApiError("quote_expired", "This quote has expired. Please request a new one."));
+
+        if (!quote.UserId.HasValue)
+        {
+            quote.UserId = userId;
+            await db.SaveChangesAsync();
+        }
 
         // Idempotency: if a live PI already exists for this quote, return it
         var existingPayment = await db.Payments.FirstOrDefaultAsync(
@@ -58,6 +64,14 @@ public static class PaymentEndpoints
                 // Only reuse if the PI is still open
                 if (existingPi.Status is "requires_payment_method" or "requires_confirmation" or "requires_action")
                 {
+                    var expectedAmountCents = (long)Math.Round(quote.TotalAmount * 100, MidpointRounding.AwayFromZero);
+                    if (Math.Abs(existingPi.Amount - expectedAmountCents) > 1)
+                    {
+                        return Results.Conflict(new ApiError(
+                            "quote_payment_amount_locked",
+                            "This quote already has a payment intent with a different amount. Please request a new quote."));
+                    }
+
                     return Results.Ok(new PaymentIntentResponse(
                         existingPi.ClientSecret!,
                         existingPi.Id,

@@ -1,7 +1,5 @@
 namespace RyveSwift.Api.Dtos;
 
-// ─── Request ───────────────────────────────────────────────────────────────
-
 public record QuoteAddressInput(
     string Country,
     string? PostalCode,
@@ -21,21 +19,58 @@ public record QuoteCustomsInput(
 public record QuoteRequest(
     QuoteAddressInput Origin,
     QuoteAddressInput Destination,
-    string ShipmentType,          // "parcel" | "documents"
+    string ShipmentType,
     int Pieces,
     decimal WeightKg,
     QuoteDimensionsInput DimensionsCm,
     QuoteCustomsInput? Customs,
     string? Incoterm = null);
 
-// ─── Response ──────────────────────────────────────────────────────────────
+public record QuoteDeliveryOptionRequest(
+    bool Enabled,
+    RyvePoolAddressInput? Pickup,
+    RyvePoolAddressInput? Dropoff,
+    string? DispatchTiming,
+    DateTime? ScheduledFor,
+    string? DhlPointId,
+    string? DhlPointName,
+    string? ExternalBranchId,
+    string? DispatchMode,
+    string? PackageType,
+    decimal? WeightKg,
+    string? RegionCode,
+    string? VehicleCategoryId,
+    string? DriverInstructions);
 
 public record EtaBusinessDays(int Min, int Max);
 
 public record QuoteBreakdown(
-    decimal Base,             // shipping cost after markup (hides our discount)
-    decimal FuelSurcharge,    // always 0 — already embedded in Base
-    decimal RyveFee);         // flat platform fee
+    decimal Base,
+    decimal FuelSurcharge,
+    decimal RyveFee,
+    decimal DeliveryFee,
+    decimal Total);
+
+public record QuoteDeliveryPoint(
+    string? Id,
+    string? Name,
+    string? Address,
+    decimal? Lat,
+    decimal? Lng);
+
+public record QuoteDeliveryOptionResponse(
+    bool Enabled,
+    string Status,
+    string DispatchTiming,
+    DateTime? ScheduledFor,
+    string Currency,
+    long FeeMinor,
+    decimal FeeAmount,
+    string? PackageType,
+    string? RegionCode,
+    string? DispatchMode,
+    QuoteDeliveryPoint? Pickup,
+    QuoteDeliveryPoint? Dropoff);
 
 public record QuoteResponse(
     Guid QuoteId,
@@ -45,4 +80,5 @@ public record QuoteResponse(
     EtaBusinessDays EtaBusinessDays,
     DateTime ExpiresAt,
     QuoteBreakdown? Breakdown,
+    QuoteDeliveryOptionResponse? DeliveryOption = null,
     bool Expired = false);
