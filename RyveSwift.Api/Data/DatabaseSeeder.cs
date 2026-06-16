@@ -51,6 +51,17 @@ public static class DatabaseSeeder
         // Tracking
         new() { Key = "TRACKING_POLL_INTERVAL_MINUTES", Value = "30", Description = "Interval in minutes for background tracking sync" },
 
+        // Google Maps / Places for address entry and DHL point discovery
+        new() { Key = "GOOGLE_MAPS_ENABLED", Value = "false", Description = "Enable Google Maps and Places support for frontend address search." },
+        new() { Key = "GOOGLE_MAPS_BROWSER_KEY", Value = "PLACEHOLDER_GOOGLE_MAPS_BROWSER_KEY", Description = "Google Maps browser key for Maps JavaScript and Places Autocomplete.", IsSecret = true },
+        new() { Key = "GOOGLE_MAPS_SERVER_KEY", Value = "PLACEHOLDER_GOOGLE_MAPS_SERVER_KEY", Description = "Google Maps server key for backend Places API calls.", IsSecret = true },
+        new() { Key = "GOOGLE_MAPS_PLACES_BASE_URL", Value = "https://maps.googleapis.com/maps/api/place", Description = "Google Places API base URL." },
+        new() { Key = "GOOGLE_MAPS_MAP_ID", Value = "", Description = "Optional Google Maps cloud map ID for the frontend." },
+        new() { Key = "GOOGLE_MAPS_COUNTRY_RESTRICTIONS", Value = "CA,US,GH,NG,KE,ZA,ET", Description = "Comma-separated country restrictions for frontend address autocomplete." },
+        new() { Key = "GOOGLE_MAPS_DEFAULT_RADIUS_METERS", Value = "10000", Description = "Default radius for DHL point search around user location." },
+        new() { Key = "GOOGLE_MAPS_MAX_DHL_POINTS", Value = "10", Description = "Maximum DHL points returned to the frontend." },
+        new() { Key = "GOOGLE_MAPS_DEFAULT_DHL_POINT_PHONE", Value = "+18002255345", Description = "Fallback phone number for DHL point dropoff records when Google does not return a phone." },
+
         // RyvePool order delivery integration
         new() { Key = "RYVEPOOL_ENABLED", Value = "false", Description = "Enable RyvePool order delivery integration." },
         new() { Key = "RYVEPOOL_ENVIRONMENT", Value = "test", Description = "Active RyvePool environment: test or production." },

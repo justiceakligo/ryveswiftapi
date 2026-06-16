@@ -76,6 +76,7 @@ builder.Services.AddRateLimiter(options =>
 // HTTP clients
 builder.Services.AddHttpClient("dhl");
 builder.Services.AddHttpClient("ryvepool");
+builder.Services.AddHttpClient("googlemaps");
 builder.Services.AddHttpClient("resend", client =>
 {
     client.BaseAddress = new Uri("https://api.resend.com/");
@@ -89,6 +90,7 @@ builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<DhlService>();
 builder.Services.AddScoped<RyvePoolService>();
 builder.Services.AddScoped<RyvePoolDispatchCoordinator>();
+builder.Services.AddScoped<GoogleMapsService>();
 builder.Services.AddScoped<LocationSuggestionService>();
 builder.Services.AddScoped<StripeService>();
 builder.Services.AddScoped<MarkupService>();
@@ -170,6 +172,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok", timestamp = DateTime
 app.MapAuthEndpoints();
 app.MapUserEndpoints();
 app.MapAddressEndpoints();
+app.MapMapsEndpoints();
 app.MapLocationEndpoints();
 app.MapQuoteEndpoints();
 app.MapShipmentEndpoints();
@@ -179,6 +182,7 @@ app.MapTrackingEndpoints();
 app.MapBookingEndpoints();
 app.MapRyvePoolDeliveryEndpoints();
 app.MapAdminRyvePoolEndpoints();
+app.MapAdminMapsEndpoints();
 app.MapAdminEndpoints();
 
 app.Run();

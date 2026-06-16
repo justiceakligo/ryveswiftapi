@@ -49,9 +49,19 @@ Do not calculate Stripe amount on the frontend.
 
 ## 3. DHL Point Selection Requirement
 
-The backend does not currently include a DHL service-point locator endpoint.
+The backend now includes a Google Places-backed DHL point finder:
 
-For this version, frontend must provide the selected DHL point details when attaching the delivery option:
+```text
+GET /api/locations/dhl-points
+```
+
+See:
+
+```text
+GOOGLE_MAPS_DHL_POINTS_FRONTEND_HANDOFF.md
+```
+
+Frontend must provide the selected DHL point details when attaching the delivery option:
 
 - DHL point ID or name
 - DHL point display address
