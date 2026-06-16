@@ -55,7 +55,7 @@ public static class DatabaseSeeder
         new() { Key = "GOOGLE_MAPS_ENABLED", Value = "false", Description = "Enable Google Maps and Places support for frontend address search." },
         new() { Key = "GOOGLE_MAPS_BROWSER_KEY", Value = "PLACEHOLDER_GOOGLE_MAPS_BROWSER_KEY", Description = "Google Maps browser key for Maps JavaScript and Places Autocomplete.", IsSecret = true },
         new() { Key = "GOOGLE_MAPS_SERVER_KEY", Value = "PLACEHOLDER_GOOGLE_MAPS_SERVER_KEY", Description = "Google Maps server key for backend Places API calls.", IsSecret = true },
-        new() { Key = "GOOGLE_MAPS_PLACES_BASE_URL", Value = "https://maps.googleapis.com/maps/api/place", Description = "Google Places API base URL." },
+        new() { Key = "GOOGLE_MAPS_PLACES_BASE_URL", Value = "https://places.googleapis.com/v1", Description = "Google Places API (New) base URL." },
         new() { Key = "GOOGLE_MAPS_MAP_ID", Value = "", Description = "Optional Google Maps cloud map ID for the frontend." },
         new() { Key = "GOOGLE_MAPS_COUNTRY_RESTRICTIONS", Value = "CA,US,GH,NG,KE,ZA,ET", Description = "Comma-separated country restrictions for frontend address autocomplete." },
         new() { Key = "GOOGLE_MAPS_DEFAULT_RADIUS_METERS", Value = "10000", Description = "Default radius for DHL point search around user location." },

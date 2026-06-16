@@ -56,7 +56,7 @@ Sample response:
 ```json
 {
   "enabled": true,
-  "placesBaseUrl": "https://maps.googleapis.com/maps/api/place",
+  "placesBaseUrl": "https://places.googleapis.com/v1",
   "browserKeyConfigured": true,
   "browserKey": "AIzaSy...abcd",
   "serverKeyConfigured": true,
@@ -84,7 +84,7 @@ Sample request:
   "enabled": true,
   "browserKey": "<google_maps_browser_key>",
   "serverKey": "<google_maps_server_key_or_same_key_if_allowed>",
-  "placesBaseUrl": "https://maps.googleapis.com/maps/api/place",
+  "placesBaseUrl": "https://places.googleapis.com/v1",
   "mapId": null,
   "countryRestrictions": "CA,US,GH,NG,KE,ZA,ET",
   "defaultRadiusMeters": 10000,
@@ -336,5 +336,5 @@ Disable the pay button if the optional pickup toggle is on but `deliveryOption` 
 - Restrict the browser key in Google Cloud to `https://ryvesend.com/*`.
 - Restrict the server key by API and keep it backend-only.
 - Enable Maps JavaScript API and Places API for the browser key.
-- Enable Places API for the server key.
+- Enable Places API (New) for the server key.
 - Do not put Google keys in frontend `.env` files committed to git.

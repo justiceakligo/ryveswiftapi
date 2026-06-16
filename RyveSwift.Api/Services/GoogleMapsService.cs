@@ -44,7 +44,7 @@ public class GoogleMapsService
             Enabled: GetBool("GOOGLE_MAPS_ENABLED", false),
             BrowserKey: browserKey,
             ServerKey: serverKey,
-            PlacesBaseUrl: _config.Get("GOOGLE_MAPS_PLACES_BASE_URL", "https://maps.googleapis.com/maps/api/place").TrimEnd('/'),
+            PlacesBaseUrl: _config.Get("GOOGLE_MAPS_PLACES_BASE_URL", "https://places.googleapis.com/v1").TrimEnd('/'),
             MapId: Clean(_config.Get("GOOGLE_MAPS_MAP_ID", "")),
             CountryRestrictions: ParseCsv(_config.Get("GOOGLE_MAPS_COUNTRY_RESTRICTIONS", "CA,US,GH,NG,KE,ZA,ET")),
             DefaultRadiusMeters: defaultRadius,
@@ -107,14 +107,8 @@ public class GoogleMapsService
                 {
                     var response = await SendPlacesRequestAsync(
                         cfg,
-                        "nearbysearch/json",
-                        new Dictionary<string, string?>
-                        {
-                            ["location"] = $"{ToInvariant(lat!.Value)},{ToInvariant(lng!.Value)}",
-                            ["radius"] = searchRadius.ToString(CultureInfo.InvariantCulture),
-                            ["keyword"] = keyword,
-                            ["key"] = key
-                        },
+                        BuildTextSearchBody(keyword, country, lat, lng, searchRadius, maxResults),
+                        key,
                         ct);
 
                     AddMappedPoints(points, response, cfg.DefaultDhlPointPhone, lat, lng, "google_nearbysearch");
@@ -128,19 +122,11 @@ public class GoogleMapsService
             if (points.Count < maxResults && (!string.IsNullOrWhiteSpace(cleanedQuery) || !string.IsNullOrWhiteSpace(cleanedCity)))
             {
                 var textQuery = BuildTextQuery(cleanedQuery, cleanedCity, country);
-                var parameters = new Dictionary<string, string?>
-                {
-                    ["query"] = textQuery,
-                    ["key"] = key
-                };
-
-                if (hasLocation)
-                {
-                    parameters["location"] = $"{ToInvariant(lat!.Value)},{ToInvariant(lng!.Value)}";
-                    parameters["radius"] = searchRadius.ToString(CultureInfo.InvariantCulture);
-                }
-
-                var response = await SendPlacesRequestAsync(cfg, "textsearch/json", parameters, ct);
+                var response = await SendPlacesRequestAsync(
+                    cfg,
+                    BuildTextSearchBody(textQuery, country, lat, lng, searchRadius, maxResults),
+                    key,
+                    ct);
                 AddMappedPoints(points, response, cfg.DefaultDhlPointPhone, lat, lng, string.IsNullOrWhiteSpace(cleanedQuery) ? "google_city_textsearch" : "google_textsearch");
                 AddWarningIfNeeded(warnings, response);
             }
@@ -181,23 +167,26 @@ public class GoogleMapsService
 
     private async Task<GooglePlacesResponse> SendPlacesRequestAsync(
         GoogleMapsRuntimeConfig cfg,
-        string path,
-        Dictionary<string, string?> parameters,
+        GoogleTextSearchRequest payload,
+        string apiKey,
         CancellationToken ct)
     {
-        var query = string.Join("&", parameters
-            .Where(p => !string.IsNullOrWhiteSpace(p.Value))
-            .Select(p => $"{Uri.EscapeDataString(p.Key)}={Uri.EscapeDataString(p.Value!)}"));
-
         var client = _httpClientFactory.CreateClient("googlemaps");
         client.BaseAddress = new Uri(cfg.PlacesBaseUrl.TrimEnd('/') + "/");
         client.Timeout = TimeSpan.FromSeconds(15);
 
-        using var response = await client.GetAsync(path + "?" + query, ct);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "places:searchText");
+        request.Headers.TryAddWithoutValidation("X-Goog-Api-Key", apiKey);
+        request.Headers.TryAddWithoutValidation(
+            "X-Goog-FieldMask",
+            "places.id,places.displayName,places.formattedAddress,places.shortFormattedAddress,places.location,places.currentOpeningHours,places.rating,places.userRatingCount,places.nationalPhoneNumber,places.internationalPhoneNumber");
+        request.Content = JsonContent.Create(payload);
+
+        using var response = await client.SendAsync(request, ct);
         var raw = await response.Content.ReadAsStringAsync(ct);
         if (!response.IsSuccessStatusCode)
         {
-            _logger.LogWarning("Google Places {Path} returned {Status}: {Body}", path, response.StatusCode, raw);
+            _logger.LogWarning("Google Places searchText returned {Status}: {Body}", response.StatusCode, raw);
             throw new InvalidOperationException($"Google Places returned HTTP {(int)response.StatusCode}.");
         }
 
@@ -206,10 +195,43 @@ public class GoogleMapsService
 
         if (parsed.Status is "REQUEST_DENIED" or "INVALID_REQUEST")
         {
-            _logger.LogWarning("Google Places {Path} returned {Status}: {Error}", path, parsed.Status, parsed.ErrorMessage);
+            _logger.LogWarning("Google Places searchText returned {Status}: {Error}", parsed.Status, parsed.ErrorMessage);
         }
 
         return parsed;
+    }
+
+    private static GoogleTextSearchRequest BuildTextSearchBody(
+        string textQuery,
+        string? country,
+        decimal? lat,
+        decimal? lng,
+        int radiusMeters,
+        int maxResults)
+    {
+        var locationBias = lat.HasValue && lng.HasValue
+            ? new GoogleLocationBias
+            {
+                Circle = new GoogleCircle
+                {
+                    Center = new GoogleLatLng
+                    {
+                        Latitude = lat.Value,
+                        Longitude = lng.Value
+                    },
+                    Radius = Math.Clamp(radiusMeters, 500, 50000)
+                }
+            }
+            : null;
+
+        return new GoogleTextSearchRequest
+        {
+            TextQuery = textQuery,
+            MaxResultCount = Math.Clamp(maxResults, 1, 20),
+            RegionCode = NormalizeRegionCode(country),
+            LocationBias = locationBias,
+            IncludePureServiceAreaBusinesses = false
+        };
     }
 
     private static void AddMappedPoints(
@@ -220,16 +242,16 @@ public class GoogleMapsService
         decimal? originLng,
         string source)
     {
-        if (response.Results is null || response.Status is "REQUEST_DENIED" or "INVALID_REQUEST")
+        if (response.Places is null || response.Status is "REQUEST_DENIED" or "INVALID_REQUEST")
             return;
 
-        foreach (var result in response.Results)
+        foreach (var result in response.Places)
         {
-            var placeId = Clean(result.PlaceId);
-            var name = Clean(result.Name);
-            var address = Clean(result.FormattedAddress) ?? Clean(result.Vicinity);
-            var pointLat = result.Geometry?.Location?.Lat;
-            var pointLng = result.Geometry?.Location?.Lng;
+            var placeId = Clean(result.Id);
+            var name = Clean(result.DisplayName?.Text);
+            var address = Clean(result.FormattedAddress) ?? Clean(result.ShortFormattedAddress);
+            var pointLat = result.Location?.Latitude;
+            var pointLng = result.Location?.Longitude;
 
             if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(address) ||
                 !pointLat.HasValue || !pointLng.HasValue)
@@ -240,15 +262,16 @@ public class GoogleMapsService
                 GooglePlaceId: placeId,
                 Name: name,
                 Address: address,
-                Phone: string.IsNullOrWhiteSpace(defaultPhone) ? null : defaultPhone.Trim(),
+                Phone: Clean(result.InternationalPhoneNumber) ?? Clean(result.NationalPhoneNumber) ??
+                    (string.IsNullOrWhiteSpace(defaultPhone) ? null : defaultPhone.Trim()),
                 Latitude: pointLat.Value,
                 Longitude: pointLng.Value,
                 DistanceKm: originLat.HasValue && originLng.HasValue
                     ? DistanceKm(originLat.Value, originLng.Value, pointLat.Value, pointLng.Value)
                     : null,
-                OpenNow: result.OpeningHours?.OpenNow,
+                OpenNow: result.CurrentOpeningHours?.OpenNow,
                 Rating: result.Rating,
-                UserRatingsTotal: result.UserRatingsTotal,
+                UserRatingsTotal: result.UserRatingCount,
                 Source: source));
         }
     }
@@ -285,6 +308,12 @@ public class GoogleMapsService
             cleaned += $" {country.Trim().ToUpperInvariant()}";
 
         return cleaned;
+    }
+
+    private static string? NormalizeRegionCode(string? country)
+    {
+        var normalized = Clean(country)?.ToUpperInvariant();
+        return normalized is { Length: 2 } && normalized.All(char.IsLetter) ? normalized : null;
     }
 
     private static string? GetServerKey(GoogleMapsRuntimeConfig cfg)
@@ -359,56 +388,110 @@ public class GoogleMapsService
         [JsonPropertyName("error_message")]
         public string? ErrorMessage { get; init; }
 
-        [JsonPropertyName("results")]
-        public List<GooglePlaceResult>? Results { get; init; }
+        [JsonPropertyName("places")]
+        public List<GooglePlaceResult>? Places { get; init; }
     }
 
     private sealed record GooglePlaceResult
     {
-        [JsonPropertyName("place_id")]
-        public string? PlaceId { get; init; }
+        [JsonPropertyName("id")]
+        public string? Id { get; init; }
+
+        [JsonPropertyName("displayName")]
+        public GoogleLocalizedText? DisplayName { get; init; }
 
         [JsonPropertyName("name")]
         public string? Name { get; init; }
 
-        [JsonPropertyName("vicinity")]
-        public string? Vicinity { get; init; }
-
         [JsonPropertyName("formatted_address")]
         public string? FormattedAddress { get; init; }
 
-        [JsonPropertyName("geometry")]
-        public GoogleGeometry? Geometry { get; init; }
+        [JsonPropertyName("formattedAddress")]
+        public string? FormattedAddressNew
+        {
+            init => FormattedAddress = value;
+        }
 
-        [JsonPropertyName("opening_hours")]
-        public GoogleOpeningHours? OpeningHours { get; init; }
+        [JsonPropertyName("shortFormattedAddress")]
+        public string? ShortFormattedAddress { get; init; }
+
+        [JsonPropertyName("location")]
+        public GoogleLatLng? Location { get; init; }
+
+        [JsonPropertyName("currentOpeningHours")]
+        public GoogleOpeningHours? CurrentOpeningHours { get; init; }
 
         [JsonPropertyName("rating")]
         public decimal? Rating { get; init; }
 
-        [JsonPropertyName("user_ratings_total")]
-        public int? UserRatingsTotal { get; init; }
+        [JsonPropertyName("userRatingCount")]
+        public int? UserRatingCount { get; init; }
+
+        [JsonPropertyName("nationalPhoneNumber")]
+        public string? NationalPhoneNumber { get; init; }
+
+        [JsonPropertyName("internationalPhoneNumber")]
+        public string? InternationalPhoneNumber { get; init; }
     }
 
-    private sealed record GoogleGeometry
+    private sealed record GoogleLocalizedText
     {
-        [JsonPropertyName("location")]
-        public GoogleLocation? Location { get; init; }
+        [JsonPropertyName("text")]
+        public string? Text { get; init; }
     }
 
-    private sealed record GoogleLocation
+    private sealed record GoogleLatLng
     {
-        [JsonPropertyName("lat")]
-        public decimal Lat { get; init; }
+        [JsonPropertyName("latitude")]
+        public decimal Latitude { get; init; }
 
-        [JsonPropertyName("lng")]
-        public decimal Lng { get; init; }
+        [JsonPropertyName("longitude")]
+        public decimal Longitude { get; init; }
     }
 
     private sealed record GoogleOpeningHours
     {
         [JsonPropertyName("open_now")]
         public bool? OpenNow { get; init; }
+
+        [JsonPropertyName("openNow")]
+        public bool? OpenNowNew
+        {
+            init => OpenNow = value;
+        }
+    }
+
+    private sealed record GoogleTextSearchRequest
+    {
+        [JsonPropertyName("textQuery")]
+        public string TextQuery { get; init; } = "";
+
+        [JsonPropertyName("maxResultCount")]
+        public int MaxResultCount { get; init; }
+
+        [JsonPropertyName("regionCode")]
+        public string? RegionCode { get; init; }
+
+        [JsonPropertyName("locationBias")]
+        public GoogleLocationBias? LocationBias { get; init; }
+
+        [JsonPropertyName("includePureServiceAreaBusinesses")]
+        public bool IncludePureServiceAreaBusinesses { get; init; }
+    }
+
+    private sealed record GoogleLocationBias
+    {
+        [JsonPropertyName("circle")]
+        public GoogleCircle Circle { get; init; } = new();
+    }
+
+    private sealed record GoogleCircle
+    {
+        [JsonPropertyName("center")]
+        public GoogleLatLng Center { get; init; } = new();
+
+        [JsonPropertyName("radius")]
+        public decimal Radius { get; init; }
     }
 }
 
