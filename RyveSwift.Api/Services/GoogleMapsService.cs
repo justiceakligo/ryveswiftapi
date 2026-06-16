@@ -172,10 +172,10 @@ public class GoogleMapsService
         CancellationToken ct)
     {
         var client = _httpClientFactory.CreateClient("googlemaps");
-        client.BaseAddress = new Uri(cfg.PlacesBaseUrl.TrimEnd('/') + "/");
+        var requestUri = new Uri(cfg.PlacesBaseUrl.TrimEnd('/') + "/places:searchText");
         client.Timeout = TimeSpan.FromSeconds(15);
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, "places:searchText");
+        using var request = new HttpRequestMessage(HttpMethod.Post, requestUri);
         request.Headers.TryAddWithoutValidation("X-Goog-Api-Key", apiKey);
         request.Headers.TryAddWithoutValidation(
             "X-Goog-FieldMask",
